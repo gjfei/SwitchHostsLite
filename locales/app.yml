@@ -1,0 +1,587 @@
+_version: 2
+
+# Common
+ok:
+  zh-CN: "确定"
+  zh-TW: "確定"
+  en: "OK"
+cancel:
+  zh-CN: "取消"
+  zh-TW: "取消"
+  en: "Cancel"
+close:
+  zh-CN: "关闭"
+  zh-TW: "關閉"
+  en: "Close"
+edit:
+  zh-CN: "编辑"
+  zh-TW: "編輯"
+  en: "Edit"
+apply:
+  zh-CN: "应用"
+  zh-TW: "套用"
+  en: "Apply"
+untitled:
+  zh-CN: "未命名"
+  zh-TW: "未命名"
+  en: "Untitled"
+system_hosts:
+  zh-CN: "系统 Hosts"
+  zh-TW: "系統 Hosts"
+  en: "System Hosts"
+hosts_add:
+  zh-CN: "添加 hosts"
+  zh-TW: "新增 hosts"
+  en: "Add Hosts Entry"
+hosts_edit:
+  zh-CN: "编辑 hosts"
+  zh-TW: "編輯 hosts"
+  en: "Edit Hosts"
+hosts_title:
+  zh-CN: "Hosts 标题"
+  zh-TW: "Hosts 標題"
+  en: "Hosts Title"
+hosts_type:
+  zh-CN: "Hosts 类型"
+  zh-TW: "Hosts 類型"
+  en: "Hosts Type"
+kind_local:
+  zh-CN: "本地"
+  zh-TW: "本機"
+  en: "Local"
+kind_group:
+  zh-CN: "组合"
+  zh-TW: "群組"
+  en: "Group"
+kind_folder:
+  zh-CN: "文件夹"
+  zh-TW: "資料夾"
+  en: "Folder"
+choice_mode:
+  zh-CN: "选择模式"
+  zh-TW: "選擇模式"
+  en: "Choice Mode"
+choice_default:
+  zh-CN: "默认"
+  zh-TW: "預設"
+  en: "Default"
+choice_default_effect:
+  zh-CN: "跟随「允许同时启用多个顶层方案」设置"
+  zh-TW: "跟隨「允許同時啟用多個頂層項目」設定"
+  en: "Follows the \"Allow multiple top-level items to be enabled\" setting."
+choice_single:
+  zh-CN: "单选"
+  zh-TW: "單選"
+  en: "Single"
+choice_multi:
+  zh-CN: "多选"
+  zh-TW: "多選"
+  en: "Multiple"
+choice_single_effect:
+  zh-CN: "文件夹内的方案同一时间只能启用一个"
+  zh-TW: "此資料夾內的項目一次只能開啟一個"
+  en: "Only one item in this folder can be enabled at a time."
+choice_multi_effect:
+  zh-CN: "文件夹内可以同时启用多个方案"
+  zh-TW: "此資料夾內的項目可以同時開啟多個"
+  en: "Multiple items in this folder can be enabled at the same time."
+type_locked:
+  zh-CN: "类型创建后不可修改"
+  zh-TW: "類型建立後無法修改"
+  en: "The type cannot be changed after creation"
+content:
+  zh-CN: "内容"
+  zh-TW: "內容"
+  en: "Content"
+no_local_hosts:
+  zh-CN: "还没有本地方案，请先添加本地 hosts"
+  zh-TW: "還沒有本機項目，請先新增本機 hosts"
+  en: "No local hosts yet. Add a local hosts entry first."
+include_available:
+  zh-CN: "可选方案"
+  zh-TW: "可選項目"
+  en: "Available"
+include_chosen:
+  zh-CN: "已选方案"
+  zh-TW: "已選項目"
+  en: "Chosen"
+include_none_available:
+  zh-CN: "没有可选的方案"
+  zh-TW: "沒有可選的項目"
+  en: "Nothing to choose"
+include_click_to_add:
+  zh-CN: "点击左侧方案添加"
+  zh-TW: "按一下左側項目以加入"
+  en: "Click an item on the left to add it"
+
+# Trash
+move_to_trash:
+  zh-CN: "移到回收站"
+  zh-TW: "移到垃圾桶"
+  en: "Move to Trashcan"
+move_to_trash_confirm:
+  zh-CN: "「%{title}」将被移到回收站。"
+  zh-TW: "「%{title}」將被移到垃圾桶。"
+  en: "\"%{title}\" will be moved to the trashcan."
+trashcan:
+  zh-CN: "回收站"
+  zh-TW: "垃圾桶"
+  en: "Trashcan"
+trash_clear:
+  zh-CN: "清空回收站"
+  zh-TW: "清空垃圾桶"
+  en: "Empty Trashcan"
+trash_clear_confirm:
+  zh-CN: "确实要清空回收站吗？"
+  zh-TW: "確定要清空垃圾桶嗎？"
+  en: "Are you sure you want to empty the trashcan?"
+trash_delete_confirm:
+  zh-CN: "要彻底删除本项吗？"
+  zh-TW: "確定要永久刪除這個項目嗎？"
+  en: "Do you want to delete this item completely?"
+trash_empty:
+  zh-CN: "回收站为空"
+  zh-TW: "垃圾桶是空的"
+  en: "Trashcan is empty"
+restore:
+  zh-CN: "还原"
+  zh-TW: "還原"
+  en: "Restore"
+restored:
+  zh-CN: "已还原"
+  zh-TW: "已還原"
+  en: "Restored"
+delete_permanently:
+  zh-CN: "彻底删除"
+  zh-TW: "永久刪除"
+  en: "Delete Permanently"
+hosts_delete:
+  zh-CN: "删除当前方案"
+  zh-TW: "刪除 Hosts 項目"
+  en: "Delete Hosts Entry"
+deleted_at:
+  zh-CN: "删除时间"
+  zh-TW: "刪除時間"
+  en: "Deleted"
+move_to:
+  zh-CN: "移动到…"
+  zh-TW: "移動到…"
+  en: "Move to…"
+top_level:
+  zh-CN: "顶层"
+  zh-TW: "頂層"
+  en: "Top Level"
+
+# Sidebar and settings
+hosts_list:
+  zh-CN: "Hosts 列表"
+  zh-TW: "Hosts 列表"
+  en: "Hosts List"
+show_history:
+  zh-CN: "显示历史记录"
+  zh-TW: "顯示歷史紀錄"
+  en: "Show History"
+settings:
+  zh-CN: "设置"
+  zh-TW: "設定"
+  en: "Settings"
+menu_import:
+  zh-CN: "导入"
+  zh-TW: "匯入"
+  en: "Import"
+menu_export:
+  zh-CN: "导出"
+  zh-TW: "匯出"
+  en: "Export"
+menu_preferences:
+  zh-CN: "偏好设置"
+  zh-TW: "偏好設定"
+  en: "Preferences"
+preferences:
+  zh-CN: "偏好设置"
+  zh-TW: "偏好設定"
+  en: "Preferences"
+about:
+  zh-CN: "关于"
+  zh-TW: "關於"
+  en: "About"
+about_version:
+  zh-CN: "版本 %{version}"
+  zh-TW: "版本 %{version}"
+  en: "Version %{version}"
+about_description:
+  zh-CN: "一个轻量的 hosts 切换工具，灵感来自 SwitchHosts："
+  zh-TW: "一個輕量的 hosts 切換工具，靈感來自 SwitchHosts："
+  en: "A lightweight hosts switcher inspired by SwitchHosts:"
+multi_select:
+  zh-CN: "允许同时启用多个顶层方案"
+  zh-TW: "允許同時啟用多個頂層項目"
+  en: "Allow multiple top-level items to be enabled"
+language:
+  zh-CN: "语言"
+  zh-TW: "語言"
+  en: "Language"
+theme:
+  zh-CN: "主题"
+  zh-TW: "主題"
+  en: "Theme"
+follow_system:
+  zh-CN: "跟随系统"
+  zh-TW: "跟隨系統"
+  en: "Follow System"
+theme_light:
+  zh-CN: "浅色"
+  zh-TW: "淺色"
+  en: "Light"
+theme_dark:
+  zh-CN: "深色"
+  zh-TW: "深色"
+  en: "Dark"
+light_color_theme:
+  zh-CN: "浅色配色"
+  zh-TW: "淺色配色"
+  en: "Light theme"
+dark_color_theme:
+  zh-CN: "深色配色"
+  zh-TW: "深色配色"
+  en: "Dark theme"
+more_color_themes:
+  zh-CN: "更多配色"
+  zh-TW: "更多配色"
+  en: "More Themes"
+
+# Import / export
+import:
+  zh-CN: "导入"
+  zh-TW: "匯入"
+  en: "Import"
+import_confirm:
+  zh-CN: "将导入 %{count} 个顶层项目并替换当前方案，当前方案会移到回收站。"
+  zh-TW: "將匯入 %{count} 個頂層項目並取代目前的項目，目前的項目會移到垃圾桶。"
+  en: "%{count} top-level items will be imported and replace the current ones, which will be moved to the trashcan."
+import_done:
+  zh-CN: "导入成功"
+  zh-TW: "匯入成功"
+  en: "Imported successfully"
+import_failed:
+  zh-CN: "导入失败：%{error}"
+  zh-TW: "匯入失敗：%{error}"
+  en: "Import failed: %{error}"
+export_done:
+  zh-CN: "导出成功"
+  zh-TW: "匯出成功"
+  en: "Exported successfully"
+export_failed:
+  zh-CN: "导出失败：%{error}"
+  zh-TW: "匯出失敗：%{error}"
+  en: "Export failed: %{error}"
+
+# History
+system_hosts_history:
+  zh-CN: "系统 Hosts 历史版本"
+  zh-TW: "系統 Hosts 歷史版本"
+  en: "System Hosts Version History"
+no_record:
+  zh-CN: "没有记录"
+  zh-TW: "沒有紀錄"
+  en: "No Records"
+history_entry_size:
+  zh-CN: "%{lines} 行 · %{bytes} 字节"
+  zh-TW: "%{lines} 行 · %{bytes} 位元組"
+  en: "%{lines} lines · %{bytes} bytes"
+clear_history:
+  zh-CN: "清空历史记录"
+  zh-TW: "清除歷史紀錄"
+  en: "Clear History"
+history_clear_confirm:
+  zh-CN: "确定清空所有系统 Hosts 历史记录吗？删除后无法恢复。"
+  zh-TW: "確定清空所有系統 Hosts 歷史記錄嗎？刪除後無法復原。"
+  en: "Clear all system Hosts history? This cannot be undone."
+delete_record:
+  zh-CN: "删除记录"
+  zh-TW: "刪除紀錄"
+  en: "Delete Record"
+restore_this_version:
+  zh-CN: "恢复此版本"
+  zh-TW: "還原此版本"
+  en: "Restore This Version"
+restore_history_title:
+  zh-CN: "恢复历史版本"
+  zh-TW: "還原歷史版本"
+  en: "Restore Version"
+restore_history_confirm:
+  zh-CN: "将系统 hosts 恢复为 %{time} 的版本？"
+  zh-TW: "將系統 hosts 還原為 %{time} 的版本？"
+  en: "Restore the system hosts to the version from %{time}?"
+history_restored:
+  zh-CN: "已恢复历史版本"
+  zh-TW: "已還原歷史版本"
+  en: "Version restored"
+
+# Main panel
+toggle_list:
+  zh-CN: "显示/隐藏列表"
+  zh-TW: "顯示/隱藏列表"
+  en: "Show/Hide List"
+toggle_info:
+  zh-CN: "显示/隐藏信息面板"
+  zh-TW: "顯示/隱藏資訊面板"
+  en: "Show/Hide Info Panel"
+read_only:
+  zh-CN: "只读"
+  zh-TW: "唯讀"
+  en: "Read Only"
+unapplied_changes:
+  zh-CN: "有未应用的更改"
+  zh-TW: "有尚未套用的變更"
+  en: "Unapplied changes"
+applied:
+  zh-CN: "已应用"
+  zh-TW: "已套用"
+  en: "Applied"
+apply_tooltip:
+  zh-CN: "将已启用的方案写入系统 hosts（%{shortcut}）"
+  zh-TW: "將已啟用的項目寫入系統 hosts（%{shortcut}）"
+  en: "Write the enabled items to the system hosts (%{shortcut})"
+line_count:
+  zh-CN: "%{count} 行"
+  zh-TW: "%{count} 行"
+  en: "%{count} lines"
+byte_count:
+  zh-CN: "%{count} 字节"
+  zh-TW: "%{count} 位元組"
+  en: "%{count} bytes"
+hosts_updated:
+  zh-CN: "Hosts 文件已更新。"
+  zh-TW: "Hosts 檔案已更新。"
+  en: "The Hosts file has been updated."
+
+# Info panel
+nothing_selected:
+  zh-CN: "未选择"
+  zh-TW: "未選擇"
+  en: "Nothing selected"
+path:
+  zh-CN: "路径"
+  zh-TW: "路徑"
+  en: "Path"
+rules:
+  zh-CN: "规则数"
+  zh-TW: "規則"
+  en: "Rules"
+system_hosts_hint:
+  zh-CN: "系统 Hosts 为只读，请在左侧方案中编辑"
+  zh-TW: "系統 Hosts 為唯讀，請在左側的項目中編輯"
+  en: "System hosts are read-only. Edit the items on the left instead."
+child_count:
+  zh-CN: "子项数"
+  zh-TW: "子項目數"
+  en: "Children"
+included_items:
+  zh-CN: "包含的方案"
+  zh-TW: "包含的項目"
+  en: "Included Items"
+none_included:
+  zh-CN: "未选择任何方案"
+  zh-TW: "未選擇任何項目"
+  en: "No items selected"
+
+# Errors
+err_hosts_not_utf8:
+  zh-CN: "hosts 文件不是 UTF-8 编码，为避免破坏原有内容已停止写入，请先将其另存为 UTF-8"
+  zh-TW: "hosts 檔案不是 UTF-8 編碼，為避免破壞原有內容已停止寫入，請先將其另存為 UTF-8"
+  en: "The hosts file is not UTF-8 encoded. Writing was stopped to keep its content intact; please save it as UTF-8 first."
+err_read_hosts:
+  zh-CN: "读取 hosts 失败"
+  zh-TW: "讀取 hosts 失敗"
+  en: "Failed to read the hosts file"
+err_write_hosts:
+  zh-CN: "写入 hosts 失败"
+  zh-TW: "寫入 hosts 失敗"
+  en: "Failed to write the hosts file"
+err_hosts_locked:
+  zh-CN: "hosts 文件正被其他程序占用（可能是杀毒软件），请稍后重试或在杀毒软件中允许修改 hosts"
+  zh-TW: "hosts 檔案正被其他程式佔用（可能是防毒軟體），請稍後重試或在防毒軟體中允許修改 hosts"
+  en: "The hosts file is in use by another program (possibly antivirus software). Try again later or allow changes to the hosts file in your antivirus software."
+err_hosts_mismatch:
+  zh-CN: "写入 hosts 失败：文件内容与预期不一致，可能被杀毒软件拦截，请在杀毒软件中允许修改 hosts 后重试"
+  zh-TW: "寫入 hosts 失敗：檔案內容與預期不一致，可能被防毒軟體攔截，請在防毒軟體中允許修改 hosts 後重試"
+  en: "Failed to write the hosts file: its content is not what was written. Antivirus software may have blocked it; allow changes to the hosts file there and try again."
+err_hosts_path_unknown:
+  zh-CN: "无法确定系统 hosts 文件位置"
+  zh-TW: "無法確定系統 hosts 檔案位置"
+  en: "Could not determine the location of the system hosts file"
+err_write_temp:
+  zh-CN: "写入临时文件失败"
+  zh-TW: "寫入暫存檔失敗"
+  en: "Failed to write a temporary file"
+err_launch:
+  zh-CN: "无法调用 %{program}"
+  zh-TW: "無法執行 %{program}"
+  en: "Could not run %{program}"
+err_auth_failed:
+  zh-CN: "授权失败"
+  zh-TW: "授權失敗"
+  en: "Authorization failed"
+err_auth_failed_code:
+  zh-CN: "授权失败（退出码 %{code}）"
+  zh-TW: "授權失敗（結束代碼 %{code}）"
+  en: "Authorization failed (exit code %{code})"
+err_auth_cancelled:
+  zh-CN: "已取消授权"
+  zh-TW: "已取消授權"
+  en: "Authorization was cancelled"
+err_invalid_json:
+  zh-CN: "不是有效的 JSON 文件"
+  zh-TW: "不是有效的 JSON 檔案"
+  en: "Not a valid JSON file"
+err_unknown_format:
+  zh-CN: "无法识别的备份格式"
+  zh-TW: "無法識別的備份格式"
+  en: "Unrecognized backup format"
+err_invalid_backup:
+  zh-CN: "备份文件已损坏或不完整"
+  zh-TW: "備份檔案已損毀或不完整"
+  en: "The backup is damaged or incomplete"
+err_newer_backup:
+  zh-CN: "备份来自更新版本的 SwitchHosts，暂不支持"
+  zh-TW: "備份來自更新版本的 SwitchHosts，暫不支援"
+  en: "The backup is from a newer version of SwitchHosts and is not supported yet"
+err_empty_backup:
+  zh-CN: "备份中没有可导入的方案"
+  zh-TW: "備份中沒有可匯入的項目"
+  en: "The backup contains no items to import"
+err_too_deep:
+  zh-CN: "备份层级过深"
+  zh-TW: "備份層級過深"
+  en: "The backup is nested too deeply"
+err_invalid_id:
+  zh-CN: "备份中存在无效的 id"
+  zh-TW: "備份中存在無效的 id"
+  en: "The backup contains an invalid id"
+err_duplicate_id:
+  zh-CN: "备份中存在重复的 id：%{id}"
+  zh-TW: "備份中存在重複的 id：%{id}"
+  en: "The backup contains a duplicate id: %{id}"
+err_unknown_type:
+  zh-CN: "未知的项目类型：%{kind}"
+  zh-TW: "未知的項目類型：%{kind}"
+  en: "Unknown item type: %{kind}"
+
+# Updates
+check_for_updates:
+  zh-CN: "检查更新"
+  zh-TW: "檢查更新"
+  en: "Check for Updates"
+check_for_updates_unconfigured:
+  zh-CN: "检查更新（未配置更新源）"
+  zh-TW: "檢查更新（未設定更新來源）"
+  en: "Check for Updates (no update source)"
+auto_check_updates:
+  zh-CN: "自动检查更新"
+  zh-TW: "自動檢查更新"
+  en: "Automatically check for updates"
+update_not_configured:
+  zh-CN: "未配置更新源"
+  zh-TW: "未設定更新來源"
+  en: "No update source is configured"
+update_checking:
+  zh-CN: "正在检查更新…"
+  zh-TW: "正在檢查更新…"
+  en: "Checking for updates…"
+up_to_date:
+  zh-CN: "已是最新版本（%{version}）"
+  zh-TW: "已是最新版本（%{version}）"
+  en: "You're up to date (%{version})"
+update_check_failed:
+  zh-CN: "检查更新失败：%{error}"
+  zh-TW: "檢查更新失敗：%{error}"
+  en: "Update check failed: %{error}"
+update_available:
+  zh-CN: "发现新版本 %{version}"
+  zh-TW: "發現新版本 %{version}"
+  en: "Version %{version} is available"
+update_current_version:
+  zh-CN: "当前版本 %{version}"
+  zh-TW: "目前版本 %{version}"
+  en: "Current version %{version}"
+update_no_notes:
+  zh-CN: "没有更新说明"
+  zh-TW: "沒有更新說明"
+  en: "No release notes"
+update_view:
+  zh-CN: "查看"
+  zh-TW: "查看"
+  en: "View"
+update_now:
+  zh-CN: "立即更新"
+  zh-TW: "立即更新"
+  en: "Update Now"
+update_later:
+  zh-CN: "稍后"
+  zh-TW: "稍後"
+  en: "Later"
+open_download_page:
+  zh-CN: "打开下载页面"
+  zh-TW: "開啟下載頁面"
+  en: "Open Download Page"
+update_downloading:
+  zh-CN: "正在下载… %{done} / %{total}"
+  zh-TW: "正在下載… %{done} / %{total}"
+  en: "Downloading… %{done} / %{total}"
+update_installing:
+  zh-CN: "正在安装…"
+  zh-TW: "正在安裝…"
+  en: "Installing…"
+update_failed:
+  zh-CN: "更新失败：%{error}"
+  zh-TW: "更新失敗：%{error}"
+  en: "Update failed: %{error}"
+err_network:
+  zh-CN: "网络请求失败"
+  zh-TW: "網路請求失敗"
+  en: "Network request failed"
+err_update_manifest:
+  zh-CN: "更新信息无效"
+  zh-TW: "更新資訊無效"
+  en: "The update information is invalid"
+err_update_no_asset:
+  zh-CN: "此版本没有适用于当前平台的安装包，请从下载页面手动更新"
+  zh-TW: "此版本沒有適用於目前平台的安裝檔，請從下載頁面手動更新"
+  en: "This release has no package for this platform. Please update from the download page."
+err_update_download:
+  zh-CN: "下载更新失败"
+  zh-TW: "下載更新失敗"
+  en: "Failed to download the update"
+err_update_checksum:
+  zh-CN: "更新包校验失败"
+  zh-TW: "更新檔驗證失敗"
+  en: "The update package failed verification"
+err_update_extract:
+  zh-CN: "解压更新包失败"
+  zh-TW: "解壓縮更新檔失敗"
+  en: "Failed to extract the update package"
+err_update_invalid_package:
+  zh-CN: "更新包内容无效"
+  zh-TW: "更新檔內容無效"
+  en: "The update package is invalid"
+err_update_install:
+  zh-CN: "安装更新失败"
+  zh-TW: "安裝更新失敗"
+  en: "Failed to install the update"
+err_update_relaunch:
+  zh-CN: "更新已安装，但无法自动重启，请手动重新打开应用"
+  zh-TW: "更新已安裝，但無法自動重新啟動，請手動重新開啟應用程式"
+  en: "The update was installed but the app could not restart. Please reopen it."
+err_update_not_writable:
+  zh-CN: "没有权限替换 %{dir} 中的程序，请从下载页面手动更新"
+  zh-TW: "沒有權限取代 %{dir} 中的程式，請從下載頁面手動更新"
+  en: "No permission to replace the app in %{dir}. Please update from the download page."
+err_update_dev_build:
+  zh-CN: "开发版本不支持自动更新"
+  zh-TW: "開發版本不支援自動更新"
+  en: "Automatic updates are not supported for development builds"
+err_update_translocated:
+  zh-CN: "请先将应用移到「应用程序」文件夹再更新"
+  zh-TW: "請先將應用程式移到「應用程式」檔案夾再更新"
+  en: "Move the app to the Applications folder before updating."

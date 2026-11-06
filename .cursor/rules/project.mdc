@@ -1,0 +1,19 @@
+---
+description: SwitchHosts Lite project conventions
+alwaysApply: true
+---
+
+# SwitchHosts Lite
+
+Rust (edition 2024, toolchain pinned in `rust-toolchain.toml`) desktop app on gpui + gpui-component via `gpui-kit` 0.9.0. Full guidance: `AGENTS.md`.
+
+- Keep the build warnings-free: `cargo test` and `cargo clippy --all-targets -- -D warnings` must pass.
+- Add unit tests for pure logic (store, switchhosts import/export, hosts building, editor_ops, highlight, updater parsing).
+- Every user-visible string is a `t!("key")` (rust-i18n) with zh-CN, zh-TW and en text in `locales/app.yml`; write keys as literals, and errors shown to users are `LocalizedError` with an `err_` key.
+- Never translate or change the hosts markers `SWITCHHOSTS_LITE_CONTENT_START/END`.
+- Take UI colors only from `cx.theme()` tokens; no hard-coded colors.
+- Keep platform code behind `cfg`; make platform logic `cfg(any(<os>, test))` when it can be pure.
+- Write comments only for non-obvious constraints. No new `#[allow(dead_code)]` except `cfg_attr`-gated ones.
+- Never write the real system hosts file or the real data dir from tests.
+- The cargo target dir may be overridden; use `cargo metadata` instead of assuming `target/`.
+- Keep `README.md` (Chinese) and `README.en.md` in sync with behavior changes.

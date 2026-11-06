@@ -1,0 +1,83 @@
+[package]
+name = "switch-hosts-lite"
+version = "0.0.1"
+edition = "2024"
+description = "A lightweight hosts switcher inspired by SwitchHosts"
+license = "Apache-2.0"
+# The updater reads GitHub releases of this repository (SHL_UPDATE_REPO=owner/repo
+# at build time overrides it).
+repository = "https://github.com/gjfei/SwitchHostsLite"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+dirs = "7.0.0"
+# gpui-kit pins the matching gpui release and re-exports gpui + gpui-component + icons.
+gpui-kit = "0.9.0"
+# Same version as gpui-component's, so both share one global locale.
+rust-i18n = "4.2.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+sys-locale = "0.3.2"
+
+# Update downloads use the system curl on macOS and Windows; elsewhere ureq
+# with rustls and bundled webpki roots, no gzip/json.
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
+ureq = { version = "3.5.1", default-features = false, features = ["rustls"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Environment",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+] }
+
+# Embeds assets/icon.ico into the exe when building on Windows.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.12"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+# Nothing recovers from a panic, so skip the unwinding machinery.
+panic = "abort"
+
+# Dependencies are optimized for size, except the ones that run every frame:
+# rendering, layout, text and the editor.
+[profile.release.package."*"]
+opt-level = "s"
+
+[profile.release.package.gpui-pre]
+opt-level = 3
+[profile.release.package.gpui-pre-macos]
+opt-level = 3
+[profile.release.package.gpui-pre-apple]
+opt-level = 3
+[profile.release.package.gpui-pre-windows]
+opt-level = 3
+[profile.release.package.gpui-pre-linux]
+opt-level = 3
+[profile.release.package.gpui-pre-wgpu]
+opt-level = 3
+[profile.release.package.gpui-pre-sum-tree]
+opt-level = 3
+[profile.release.package.gpui-base]
+opt-level = 3
+[profile.release.package.gpui-component]
+opt-level = 3
+[profile.release.package.taffy]
+opt-level = 3
+[profile.release.package.ropey]
+opt-level = 3
+[profile.release.package.rustybuzz]
+opt-level = 3
+

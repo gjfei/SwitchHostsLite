@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SwitchHosts Lite
+GenericName=Hosts Switcher
+Comment=A lightweight hosts switcher inspired by SwitchHosts
+Exec=switch-hosts-lite
+Icon=switch-hosts-lite
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=switch-hosts-lite

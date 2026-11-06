@@ -1,0 +1,237 @@
+name: Release
+
+# Push a tag matching the version in Cargo.toml, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  prepare:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Tag matches Cargo.toml
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [[ "$TAG" != "v$version" ]]; then
+            echo "::error::Tag $TAG does not match the Cargo.toml version $version (expected v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.key }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest, the same label as SwitchHosts. Intel is cross-compiled
+          # because Intel runners are retired.
+          - key: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - key: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+          - key: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Cross-compiled on x64: gpui's shaders are compiled by the host's fxc.
+          - key: windows-aarch64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+          # ubuntu-latest, the same label as SwitchHosts' x86_64 Linux job.
+          - key: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      NAME: SwitchHostsLite-${{ needs.prepare.outputs.version }}-${{ matrix.key }}
+      # The updater checks the releases of the repository it was built from.
+      SHL_UPDATE_REPO: ${{ github.repository }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: scripts/install-linux-deps.sh
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        if: runner.os != 'macOS'
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # ---- macOS ---------------------------------------------------------
+      - name: Bundle app
+        if: runner.os == 'macOS'
+        run: scripts/bundle-macos.sh --target ${{ matrix.target }} --out dist
+
+      # Optional: sign with a Developer ID and notarize so Gatekeeper accepts
+      # the app without the right-click > Open step. Needs these secrets:
+      #   MACOS_CERTIFICATE (base64 .p12), MACOS_CERTIFICATE_PASSWORD,
+      #   MACOS_SIGNING_IDENTITY ("Developer ID Application: …"),
+      #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (app-specific password).
+      # - name: Sign and notarize
+      #   if: runner.os == 'macOS'
+      #   env:
+      #     MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      #     MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      #     MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      #   run: |
+      #     keychain="$RUNNER_TEMP/build.keychain"
+      #     security create-keychain -p ci "$keychain"
+      #     security default-keychain -s "$keychain"
+      #     security unlock-keychain -p ci "$keychain"
+      #     echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+      #     security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+      #     security set-key-partition-list -S apple-tool:,apple: -s -k ci "$keychain"
+      #     codesign --force --deep --options runtime --timestamp -s "$MACOS_SIGNING_IDENTITY" "dist/SwitchHosts Lite.app"
+      #     ditto -c -k --keepParent "dist/SwitchHosts Lite.app" "$RUNNER_TEMP/notarize.zip"
+      #     xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+      #     xcrun stapler staple "dist/SwitchHosts Lite.app"
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p out
+          ditto -c -k --zlibCompressionLevel 9 --keepParent "dist/SwitchHosts Lite.app" "out/$NAME.zip"
+          staging="$(mktemp -d)"
+          cp -R "dist/SwitchHosts Lite.app" "$staging/"
+          ln -s /Applications "$staging/Applications"
+          # hdiutil occasionally fails with "Resource busy" on CI runners.
+          # ULMO (lzma) needs macOS 10.15+ to open and is a third smaller than UDZO.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname "SwitchHosts Lite" -srcfolder "$staging" -ov -format ULMO "out/$NAME.dmg"; then
+              break
+            fi
+            [[ $attempt == 5 ]] && exit 1
+            sleep 5
+          done
+
+      # ---- Windows -------------------------------------------------------
+      # Optional: Authenticode signing so SmartScreen warns less. Needs
+      # WINDOWS_CERTIFICATE (base64 .pfx) and WINDOWS_CERTIFICATE_PASSWORD.
+      # - name: Sign exe
+      #   if: runner.os == 'Windows'
+      #   shell: pwsh
+      #   env:
+      #     WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      #     WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     $pfx = "$env:RUNNER_TEMP\cert.pfx"
+      #     [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+      #     $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+      #     & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target\${{ matrix.target }}\release\switch-hosts-lite.exe"
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = (New-Item -ItemType Directory -Force out).FullName
+          # 7-Zip's deflate is a few percent smaller than Compress-Archive's;
+          # run from the release dir so the exe sits at the archive root.
+          Push-Location "target\${{ matrix.target }}\release"
+          7z a -tzip -mx=9 "$out\$env:NAME.zip" switch-hosts-lite.exe
+          Pop-Location
+
+      # ---- Linux ---------------------------------------------------------
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "out/$NAME"
+          cp "target/${{ matrix.target }}/release/switch-hosts-lite" "out/$NAME/"
+          cp scripts/linux/switch-hosts-lite.desktop "out/$NAME/"
+          cp assets/icon.png "out/$NAME/switch-hosts-lite.png"
+          XZ_OPT=-9 tar -C out -cJf "out/$NAME.tar.xz" "$NAME"
+          rm -rf "out/$NAME"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.key }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      # Download to "dist": "assets" collides with the repo's own assets/
+      # directory and would publish the icons and app.rc as release files.
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release notes
+        run: |
+          gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
+          cat notes.md
+
+      - name: latest.json and SHA256SUMS.txt
+        run: |
+          python3 scripts/release-manifest.py --dir dist --version "$VERSION" --tag "$TAG" \
+            --repo "${{ github.repository }}" --notes-file notes.md
+          cat dist/latest.json dist/SHA256SUMS.txt
+          ls -l dist
+
+      # The updater reads releases/latest, which skips pre-releases (tags
+      # with a `-`, e.g. v1.0.0-beta.1), so those never reach users' apps.
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          name: SwitchHosts Lite ${{ env.VERSION }}
+          body_path: notes.md
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: dist/*
+          fail_on_unmatched_files: true
