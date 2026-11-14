@@ -168,10 +168,22 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Chocolatey's NSIS package installs outside its shim directory, so
+          # makensis is not on the PATH of later steps.
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Source
+          if (-not $makensis) {
+            $makensis = @(
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+              "$env:ProgramFiles\NSIS\makensis.exe"
+            ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $makensis) { throw "makensis.exe not found after installing NSIS" }
+
           # NSIS resolves relative paths against the script's directory, so
           # every path is absolute here.
           New-Item -ItemType Directory -Force out | Out-Null
-          & makensis -DVERSION="$env:VERSION" `
+          & $makensis -DVERSION="$env:VERSION" `
             -DAPP_SRC="$env:GITHUB_WORKSPACE\target\${{ matrix.target }}\release\switch-hosts-lite.exe" `
             -DAPP_ICON="$env:GITHUB_WORKSPACE\assets\icon.ico" `
             -DOUT_FILE="$env:GITHUB_WORKSPACE\out\$env:NAME-setup.exe" `
