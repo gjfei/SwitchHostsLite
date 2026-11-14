@@ -166,15 +166,16 @@ jobs:
 
       - name: Build Windows installer
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          makensis="$(command -v makensis || true)"
-          [[ -n "$makensis" ]] || makensis="/c/Program Files (x86)/NSIS/makensis.exe"
-          mkdir -p out
-          "$makensis" -DVERSION="$VERSION" \
-            -DAPP_SRC="target/${{ matrix.target }}/release/switch-hosts-lite.exe" \
-            -DAPP_ICON="assets/icon.ico" \
-            -DOUT_FILE="out/$NAME-setup.exe" \
-            scripts/windows/installer.nsi
+          # NSIS resolves relative paths against the script's directory, so
+          # every path is absolute here.
+          New-Item -ItemType Directory -Force out | Out-Null
+          & makensis -DVERSION="$env:VERSION" `
+            -DAPP_SRC="$env:GITHUB_WORKSPACE\target\${{ matrix.target }}\release\switch-hosts-lite.exe" `
+            -DAPP_ICON="$env:GITHUB_WORKSPACE\assets\icon.ico" `
+            -DOUT_FILE="$env:GITHUB_WORKSPACE\out\$env:NAME-setup.exe" `
+            "$env:GITHUB_WORKSPACE\scripts\windows\installer.nsi"
 
       - uses: actions/upload-artifact@v7
         with:

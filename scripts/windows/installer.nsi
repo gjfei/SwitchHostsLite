@@ -33,7 +33,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 Unicode true
 
-; Icon and app paths come from the command line, relative to the repository root.
+; Icon and app paths come from the command line as absolute paths.
 !define MUI_ICON "${APP_ICON}"
 !define MUI_UNICON "${APP_ICON}"
 !define MUI_ABORTWARNING
