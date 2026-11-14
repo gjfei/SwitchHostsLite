@@ -2,9 +2,10 @@ use std::borrow::Cow;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Selectable as _, WindowExt as _,
+    ActiveTheme as _, Icon, Selectable as _, Sizable as _, StyledExt as _, WindowExt as _,
     badge::Badge,
     button::{Button, ButtonVariants as _},
+    h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
@@ -15,7 +16,7 @@ use super::{SwitchHostsApp, preferences};
 use crate::settings::{Settings, ThemePref};
 use crate::updater;
 
-const REPO_URL: &str = "https://github.com/oldj/SwitchHosts";
+const REPO_URL: &str = env!("CARGO_PKG_REPOSITORY");
 
 fn nav_button(id: &'static str, icon: IconName, tooltip: impl Into<SharedString>) -> Button {
     Button::new(id).ghost().icon(icon).tooltip(tooltip).cursor_pointer()
@@ -111,17 +112,55 @@ impl SwitchHostsApp {
     }
 
     fn show_about(window: &mut Window, cx: &mut App) {
-        window.open_alert_dialog(cx, |alert, _, cx| {
-            let muted = cx.theme().muted_foreground;
-            alert.title("SwitchHosts Lite").description(
+        window.open_dialog(cx, |dialog, _, cx| {
+            let theme = cx.theme();
+            let muted = theme.muted_foreground;
+            let repo = REPO_URL.strip_prefix("https://").unwrap_or(REPO_URL);
+            dialog.w(px(360.)).centered().child(
                 v_flex()
-                    .gap_1()
-                    .child(t!("about_version", version = env!("CARGO_PKG_VERSION")))
-                    .child(div().text_color(muted).child(t!("about_description")))
+                    .items_center()
+                    .gap_3()
+                    .pt_2()
+                    .child(img(crate::ABOUT_ICON).w(px(104.)).h(px(104.)))
                     .child(
-                        Button::new("about-link")
-                            .link()
-                            .label("github.com/oldj/SwitchHosts")
+                        div()
+                            .text_xl()
+                            .font_semibold()
+                            .child("SwitchHosts Lite"),
+                    )
+                    .child(
+                        div()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_full()
+                            .bg(theme.muted)
+                            .text_xs()
+                            .text_color(muted)
+                            .child(t!("about_version", version = env!("CARGO_PKG_VERSION"))),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(260.))
+                            .text_sm()
+                            .text_center()
+                            .text_color(muted)
+                            .child(t!("about_description")),
+                    )
+                    .child(div().w_full().h(px(1.)).bg(theme.border))
+                    .child(
+                        h_flex()
+                            .id("about-home-link")
+                            .w_full()
+                            .justify_center()
+                            .gap_1p5()
+                            .py_2()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_sm()
+                            .text_color(theme.primary)
+                            .hover(|this| this.bg(theme.list_hover))
+                            .child(Icon::new(IconName::ExternalLink).xsmall())
+                            .child(repo)
                             .on_click(|_, _, cx| cx.open_url(REPO_URL)),
                     ),
             )

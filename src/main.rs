@@ -26,10 +26,17 @@ rust_i18n::i18n!("locales", fallback = "en");
 // Icons used by the app that are not in the default component bundle.
 icon_assets!(ExtraIcons, [Clock, Layers, List, Lock, Monitor, Pencil, RotateCcw, Save, Trash]);
 
+// The bundle icons (icns/ico) are not assets gpui can load; the About dialog
+// shows this copy.
+pub(crate) const ABOUT_ICON: &str = "icons/app-icon.png";
+
 struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path == ABOUT_ICON {
+            return Ok(Some(Cow::Borrowed(include_bytes!("../assets/icon.png"))));
+        }
         match ExtraIcons.load(path)? {
             Some(bytes) => Ok(Some(bytes)),
             None => Assets.load(path),
@@ -39,6 +46,9 @@ impl AssetSource for AppAssets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = Assets.list(path)?;
         paths.extend(ExtraIcons.list(path)?);
+        if ABOUT_ICON.starts_with(path) {
+            paths.push(ABOUT_ICON.into());
+        }
         paths.sort();
         paths.dedup();
         Ok(paths)

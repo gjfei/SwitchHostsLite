@@ -210,9 +210,9 @@ about_version:
   zh-TW: "版本 %{version}"
   en: "Version %{version}"
 about_description:
-  zh-CN: "一个轻量的 hosts 切换工具，灵感来自 SwitchHosts："
-  zh-TW: "一個輕量的 hosts 切換工具，靈感來自 SwitchHosts："
-  en: "A lightweight hosts switcher inspired by SwitchHosts:"
+  zh-CN: "一个轻量的 hosts 切换工具，灵感来自 SwitchHosts"
+  zh-TW: "一個輕量的 hosts 切換工具，靈感來自 SwitchHosts"
+  en: "A lightweight hosts switcher inspired by SwitchHosts"
 multi_select:
   zh-CN: "允许同时启用多个顶层方案"
   zh-TW: "允許同時啟用多個頂層項目"
