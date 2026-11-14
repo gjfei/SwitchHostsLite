@@ -316,9 +316,74 @@ fn write_elevated(content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Exit code of the elevation script when the UAC prompt was declined (ERROR_CANCELLED).
+/// Argument that marks the elevated child started by `write_elevated`:
+/// `--elevated-write-hosts <staged file>`.
+#[cfg(any(windows, test))]
+const ELEVATED_WRITE_ARG: &str = "--elevated-write-hosts";
+
+/// The command line of the elevated child, besides the program itself.
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum ElevatedArgs {
+    /// An ordinary launch.
+    Normal,
+    /// The helper was started with a malformed command line.
+    Invalid,
+    /// Replace the system hosts with the staged file.
+    Write(PathBuf),
+}
+
+/// Only exactly the flag and its path count, so an ordinary launch, also with
+/// other arguments, never writes the hosts.
+#[cfg(any(windows, test))]
+fn elevated_args<I, S>(args: I) -> ElevatedArgs
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+    if args
+        .get(1)
+        .is_none_or(|arg| arg.as_os_str() != std::ffi::OsStr::new(ELEVATED_WRITE_ARG))
+    {
+        return ElevatedArgs::Normal;
+    }
+    match args.as_slice() {
+        [_, _, src] => ElevatedArgs::Write(PathBuf::from(src)),
+        _ => ElevatedArgs::Invalid,
+    }
+}
+
+/// When this process is the elevated helper started by `write_elevated`, write
+/// the staged hosts and exit. An ordinary launch returns immediately.
 #[cfg(windows)]
-const UAC_CANCELLED: i32 = 1223;
+pub fn run_as_elevated_helper() {
+    match elevated_args(std::env::args_os()) {
+        ElevatedArgs::Normal => {}
+        ElevatedArgs::Invalid => {
+            eprintln!("elevated helper: expected {ELEVATED_WRITE_ARG} <staged hosts>");
+            std::process::exit(1);
+        }
+        ElevatedArgs::Write(src) => {
+            let code = match replace_hosts_from(&src) {
+                Ok(()) => 0,
+                Err(err) => {
+                    eprintln!("elevated helper: {err:#}");
+                    1
+                }
+            };
+            std::process::exit(code);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn replace_hosts_from(src: &Path) -> Result<()> {
+    let content = fs::read(src).localize("err_write_hosts")?;
+    fs::write(hosts_path()?, content).localize("err_write_hosts")?;
+    flush_dns();
+    Ok(())
+}
 
 /// A process that does not flash a console window.
 #[cfg(windows)]
@@ -335,88 +400,125 @@ fn flush_dns() {
     let _ = hidden_command("ipconfig").arg("/flushdns").output();
 }
 
-/// Copy a temp file over the hosts from an elevated PowerShell, which shows
+/// Overwrite the hosts from an elevated copy of this executable, which shows
 /// the UAC prompt, then check that the hosts holds what was intended.
 #[cfg(windows)]
 fn write_elevated(content: &str) -> Result<()> {
     let hosts = hosts_path()?;
     let tmp = write_tmp(content)?;
-    let script = elevation_script(&tmp.to_string_lossy(), &hosts.to_string_lossy());
-    let output = hidden_command("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
-        .arg(encode_command(&script))
-        .output();
+    let result = run_elevated(&tmp);
     let _ = fs::remove_file(&tmp);
-    let output = output.map_err(|err| LocalizedError::new("err_launch").arg("program", "PowerShell").detail(err))?;
-    match output.status.code() {
-        Some(0) => {}
-        Some(UAC_CANCELLED) => return Err(LocalizedError::new("err_auth_cancelled").into()),
-        code => {
-            let code = code.map_or_else(|| "?".to_string(), |c| c.to_string());
-            return Err(LocalizedError::new("err_auth_failed_code")
-                .arg("code", code)
-                .detail(String::from_utf8_lossy(&output.stderr).trim())
-                .into());
-        }
-    }
+    result?;
     if fs::read(hosts).ok().as_deref() != Some(content.as_bytes()) {
         return Err(LocalizedError::new("err_hosts_mismatch").into());
     }
     Ok(())
 }
 
-/// PowerShell that runs the copy elevated and exits with its exit code, or
-/// with `UAC_CANCELLED` when elevation was refused.
-#[cfg(any(windows, test))]
-fn elevation_script(tmp: &str, hosts: &str) -> String {
-    let copy = format!(
-        "$ErrorActionPreference = 'Stop'; \
-         Copy-Item -LiteralPath {} -Destination {} -Force; \
-         ipconfig /flushdns | Out-Null; exit 0",
-        ps_quote(tmp),
-        ps_quote(hosts)
-    );
-    format!(
-        "try {{ $p = Start-Process -FilePath powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden \
-         -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{}' }} \
-         catch {{ exit 1223 }}; exit $p.ExitCode",
-        encode_command(&copy)
-    )
-}
+/// Start this executable with the `runas` verb and wait for it. The child is
+/// the elevated helper of `run_as_elevated_helper`; Windows shows the UAC
+/// prompt and its dialog reports a refused elevation.
+#[cfg(windows)]
+fn run_elevated(src: &Path) -> Result<()> {
+    use std::{
+        ffi::{OsStr, OsString},
+        mem,
+        os::windows::ffi::OsStrExt as _,
+        ptr,
+    };
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_CANCELLED, GetLastError, WAIT_OBJECT_0},
+        System::{
+            Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
+            Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject},
+        },
+        UI::{
+            Shell::{
+                SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+                ShellExecuteExW,
+            },
+            WindowsAndMessaging::SW_HIDE,
+        },
+    };
 
-/// A PowerShell single-quoted string literal. PowerShell also treats the
-/// typographic single quotes as quote characters, so those are doubled too.
-#[cfg(any(windows, test))]
-fn ps_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for c in s.chars() {
-        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
-            out.push(c);
-        }
-        out.push(c);
+    fn wide(s: &OsStr) -> Vec<u16> {
+        s.encode_wide().chain([0]).collect()
     }
-    out.push('\'');
-    out
-}
 
-/// Argument for `powershell -EncodedCommand`: base64 of the UTF-16LE script.
-#[cfg(any(windows, test))]
-fn encode_command(script: &str) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | (b as u32) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(TABLE[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
+    let exe = std::env::current_exe()
+        .map_err(|err| LocalizedError::new("err_auth_failed").detail(err))?;
+    // Windows splits this with CommandLineToArgvW, which, unlike `cmd`, does
+    // not expand `%`, so a temp path containing one survives. NTFS forbids `"`
+    // in names, so the surrounding quotes cannot be escaped away.
+    let mut params = OsString::from(ELEVATED_WRITE_ARG);
+    params.push(" \"");
+    params.push(src.as_os_str());
+    params.push("\"");
+    let verb = wide(OsStr::new("runas"));
+    let file = wide(exe.as_os_str());
+    let params = wide(&params);
+
+    // ShellExecuteExW needs an STA thread. A fresh one keeps the UI thread's
+    // COM state untouched and matches the synchronous write path.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || unsafe {
+                let hr = CoInitializeEx(ptr::null(), COINIT_APARTMENTTHREADED as u32);
+                let com = hr >= 0;
+                let mut info: SHELLEXECUTEINFOW = mem::zeroed();
+                info.cbSize = mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+                info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+                info.lpVerb = verb.as_ptr();
+                info.lpFile = file.as_ptr();
+                info.lpParameters = params.as_ptr();
+                info.nShow = SW_HIDE;
+
+                if ShellExecuteExW(&mut info) == 0 {
+                    let err = GetLastError();
+                    if com {
+                        CoUninitialize();
+                    }
+                    return Err(if err == ERROR_CANCELLED {
+                        LocalizedError::new("err_auth_cancelled").into()
+                    } else {
+                        LocalizedError::new("err_auth_failed")
+                            .detail(format!("ShellExecuteExW: error {err}"))
+                            .into()
+                    });
+                }
+                let process = info.hProcess;
+                if process.is_null() {
+                    if com {
+                        CoUninitialize();
+                    }
+                    return Err(LocalizedError::new("err_auth_failed")
+                        .detail("no process handle")
+                        .into());
+                }
+                let wait = WaitForSingleObject(process, INFINITE);
+                let mut code = 0u32;
+                let exit_known =
+                    wait == WAIT_OBJECT_0 && GetExitCodeProcess(process, &mut code) != 0;
+                CloseHandle(process);
+                if com {
+                    CoUninitialize();
+                }
+                if !exit_known {
+                    return Err(LocalizedError::new("err_auth_failed")
+                        .detail(format!("WaitForSingleObject: {wait}"))
+                        .into());
+                }
+                if code == 0 {
+                    Ok(())
+                } else {
+                    Err(LocalizedError::new("err_write_hosts")
+                        .detail(format!("elevated helper exit code {code}"))
+                        .into())
+                }
+            })
+            .join()
+            .map_err(|_| LocalizedError::new("err_auth_failed"))?
+    })
 }
 
 #[cfg(test)]
@@ -474,20 +576,20 @@ mod tests {
     }
 
     #[test]
-    fn powershell_quoting_and_encoding() {
-        assert_eq!(ps_quote(r"C:\Windows\hosts"), r"'C:\Windows\hosts'");
-        assert_eq!(ps_quote("C:\\Users\\O'Brien\\x"), "'C:\\Users\\O''Brien\\x'");
-        assert_eq!(ps_quote("a\u{2019}b"), "'a\u{2019}\u{2019}b'");
-        assert_eq!(ps_quote("$env:x `y"), "'$env:x `y'");
+    fn elevated_args_only_accept_the_helper_flag_and_one_path() {
+        let helper = |args: &[&str]| elevated_args(args.iter().copied());
 
-        // `[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(...))`
-        assert_eq!(encode_command("exit"), "ZQB4AGkAdAA=");
-        assert_eq!(encode_command("ab"), "YQBiAA==");
-        assert_eq!(encode_command(""), "");
+        assert_eq!(helper(&["switch-hosts-lite.exe"]), ElevatedArgs::Normal);
+        assert_eq!(helper(&["switch-hosts-lite.exe", "--other"]), ElevatedArgs::Normal);
+        assert_eq!(helper(&["switch-hosts-lite.exe", "a", ELEVATED_WRITE_ARG]), ElevatedArgs::Normal);
 
-        let script = elevation_script(r"C:\Temp\x'.hosts", r"C:\Windows\System32\drivers\etc\hosts");
-        assert!(script.contains("-Verb RunAs") && script.contains("exit 1223"));
-        assert!(!script.contains('"'));
+        assert_eq!(helper(&["switch-hosts-lite.exe", ELEVATED_WRITE_ARG]), ElevatedArgs::Invalid);
+        assert_eq!(helper(&["switch-hosts-lite.exe", ELEVATED_WRITE_ARG, "a", "b"]), ElevatedArgs::Invalid);
+
+        assert_eq!(
+            helper(&["switch-hosts-lite.exe", ELEVATED_WRITE_ARG, r"C:\Temp\x hosts"]),
+            ElevatedArgs::Write(PathBuf::from(r"C:\Temp\x hosts"))
+        );
     }
 
     #[test]
