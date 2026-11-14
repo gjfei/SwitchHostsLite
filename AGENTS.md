@@ -158,6 +158,7 @@ These are pure functions `fn(&str, Range<usize>) -> Option<Edit>` on UTF-8 byte 
 
 ## gpui / gpui-component gotchas (learned here)
 
+- **Controls inside the `TitleBar` on Windows.** The bar is one big drag area (`WindowControlArea::Drag`, hit-tested as `HTCAPTION`), so the system swallows clicks on its children and turns them into window drags. Wrap every control in a `div().occlude()` (see `no_drag` in `main_panel.rs`); `occlude` gives the wrapper a blocking hitbox, so the drag area is no longer under the pointer. Also stop the left mouse down there, or a one-pixel hand movement starts a window move and the click is lost.
 - **Sheets vs. the title bar.** `Sheet` starts at `theme.sheet.margin_top`, whose default is the library's `TITLE_BAR_HEIGHT`, shorter than our 44 px `TOP_BAR_HEIGHT`. `apply_theme` overrides it after every `Theme::change`, because theme changes reset it. Any new code path that changes the theme must keep doing this.
 - **Editor-only key bindings** use the context `"Input && mode == editor"` (`EDITOR_CONTEXT` in `app.rs`) so single-line inputs don't get them. Handlers call `cx.propagate()` when the editor is read-only or unfocused.
 - **Undoable programmatic edits.** Use `EntityInputHandler::replace_text_in_range(Some(utf16_range), text, ..)`, which takes **UTF-16** ranges; convert from byte offsets as `run_editor_op` does. Then call `set_selected_range_with_direction`.

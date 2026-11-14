@@ -14,6 +14,18 @@ use rust_i18n::t;
 
 use super::{Current, SwitchHostsApp, TOP_BAR_HEIGHT, display_title, item_icon, shortcut_label};
 
+/// Keeps a press on a toolbar control from becoming a Windows title-bar drag.
+/// The bar's drag area makes the system swallow clicks on its children
+/// (HTCAPTION), so controls need their own occluding hitbox; stopping the
+/// press also keeps a one-pixel hand movement from starting a window move.
+fn no_drag(control: impl IntoElement) -> Div {
+    div()
+        .occlude()
+        .flex_shrink_0()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(control)
+}
+
 impl SwitchHostsApp {
     /// The window title bar, which doubles as the main toolbar.
     pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -52,7 +64,7 @@ impl SwitchHostsApp {
                 .min_w_0()
                 .pr_2()
                 .gap_1()
-                .child(
+                .child(no_drag(
                     Button::new("toggle-list")
                         .ghost()
                         .small()
@@ -64,8 +76,8 @@ impl SwitchHostsApp {
                             this.show_list = !this.show_list;
                             cx.notify();
                         })),
-                )
-                .child(
+                ))
+                .child(no_drag(
                     Button::new("add")
                         .ghost()
                         .small()
@@ -73,7 +85,7 @@ impl SwitchHostsApp {
                         .tooltip(t!("hosts_add"))
                         .cursor_pointer()
                         .on_click(cx.listener(|this, _, window, cx| this.open_add_sheet(window, cx))),
-                )
+                ))
                 .child(
                     h_flex()
                         .flex_1()
@@ -95,7 +107,7 @@ impl SwitchHostsApp {
                                     .child(t!("read_only")),
                             )
                         })
-                        .children(switch),
+                        .children(switch.map(no_drag)),
                 )
                 .when(!applied, |this| {
                     this.child(
@@ -106,7 +118,7 @@ impl SwitchHostsApp {
                             .child(t!("unapplied_changes")),
                     )
                 })
-                .child(
+                .child(no_drag(
                     Button::new("apply")
                         .primary()
                         .small()
@@ -116,8 +128,8 @@ impl SwitchHostsApp {
                         .tooltip(t!("apply_tooltip", shortcut = shortcut_label("S")))
                         .when(!self.applying, |this| this.cursor_pointer())
                         .on_click(cx.listener(|this, _, window, cx| this.apply(None, false, window, cx))),
-                )
-                .child(
+                ))
+                .child(no_drag(
                     Button::new("toggle-info")
                         .ghost()
                         .small()
@@ -129,7 +141,7 @@ impl SwitchHostsApp {
                             this.show_info = !this.show_info;
                             cx.notify();
                         })),
-                ),
+                )),
         )
     }
 
