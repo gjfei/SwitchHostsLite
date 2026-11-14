@@ -93,6 +93,12 @@ jobs:
         if: runner.os != 'macOS'
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # The windows-latest image no longer ships NSIS; Chocolatey's shim puts
+      # makensis on PATH.
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        run: choco install nsis -y --no-progress
+
       # ---- macOS ---------------------------------------------------------
       - name: Bundle app
         if: runner.os == 'macOS'
