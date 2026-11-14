@@ -1,6 +1,6 @@
 [package]
 name = "switch-hosts-lite"
-version = "0.0.2-beta.2"
+version = "0.0.2"
 edition = "2024"
 description = "A lightweight hosts switcher inspired by SwitchHosts"
 license = "Apache-2.0"
