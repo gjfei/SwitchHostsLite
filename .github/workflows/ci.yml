@@ -22,14 +22,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Linux system libraries
-        if: runner.os == 'Linux'
-        run: scripts/install-linux-deps.sh
 
       # Installs the toolchain pinned in rust-toolchain.toml.
       - name: Toolchain

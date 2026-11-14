@@ -423,10 +423,6 @@ err_auth_failed:
   zh-CN: "授权失败"
   zh-TW: "授權失敗"
   en: "Authorization failed"
-err_auth_failed_code:
-  zh-CN: "授权失败（退出码 %{code}）"
-  zh-TW: "授權失敗（結束代碼 %{code}）"
-  en: "Authorization failed (exit code %{code})"
 err_auth_cancelled:
   zh-CN: "已取消授权"
   zh-TW: "已取消授權"

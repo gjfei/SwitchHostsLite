@@ -13,7 +13,7 @@
   <a href="https://github.com/gjfei/SwitchHostsLite/releases/latest"><img src="https://img.shields.io/github/v/release/gjfei/SwitchHostsLite?sort=semver" alt="Release"></a>
 </p>
 
-SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/SwitchHosts): a native desktop app written in Rust with [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component) (through `gpui-kit`), with no Electron or WebView. It keeps the core SwitchHosts workflow (split hosts rules into entries, switch them on and off, write them to the system hosts file) and can import SwitchHosts backups. It runs on macOS, Windows and Linux.
+SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/SwitchHosts): a native desktop app written in Rust with [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component) (through `gpui-kit`), with no Electron or WebView. It keeps the core SwitchHosts workflow (split hosts rules into entries, switch them on and off, write them to the system hosts file) and can import SwitchHosts backups. It runs on macOS and Windows.
 
 ## Features
 
@@ -57,7 +57,6 @@ Download the file for your platform from [GitHub Releases](https://github.com/gj
 | macOS, Intel | `SwitchHostsLite-<version>-macos-x86_64.dmg` or `.zip` |
 | Windows x64 | `SwitchHostsLite-<version>-windows-x86_64.zip` |
 | Windows ARM64 | `SwitchHostsLite-<version>-windows-aarch64.zip` |
-| Linux x86_64 | `SwitchHostsLite-<version>-linux-x86_64.tar.xz` |
 
 Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest.json` (used by the in-app updater).
 
@@ -79,14 +78,6 @@ Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest
 - Windows Defender occasionally flags the unsigned exe as a trojan; detection names ending in `!ml` are usually machine-learning false positives. Report it via the [Microsoft file submission](https://www.microsoft.com/en-us/wdsi/filesubmission) or temporarily add the app to Defender's exclusions.
 - Auto-update replaces the files next to the exe, so keep it in a directory the current user can write to (for example, not under `C:\Program Files`).
 - Auto-update downloads with the system `curl.exe`, which ships with Windows 10 1803 and later.
-
-### Linux
-
-- Extract it with `tar -xf SwitchHostsLite-<version>-linux-x86_64.tar.xz`. The archive contains the executable `switch-hosts-lite`, the desktop file `switch-hosts-lite.desktop` and the icon `switch-hosts-lite.png`. Put them in places such as `~/.local/bin` and `~/.local/share/applications` as you like.
-- Release builds are made on Ubuntu 24.04 and need a glibc at least that new.
-- Running needs an X11 or Wayland desktop, a working GPU driver (gpui renders through wgpu, which usually means Vulkan), and common desktop libraries such as `libxkbcommon`, `fontconfig` and `freetype`.
-- Writing `/etc/hosts` is elevated with `pkexec`, which needs polkit and an authentication agent (mainstream desktop environments ship them).
-- As on Windows, auto-update needs the executable's directory to be writable by the current user.
 
 ## Usage
 
@@ -110,7 +101,7 @@ From left to right, the window has:
 ### Applying to the system hosts
 
 - Turning a switch on or off writes immediately.
-- Click "Apply" in the title bar, or press <kbd>⌘S</kbd> (macOS) / <kbd>Ctrl+S</kbd> (Windows, Linux), to write the content of all effective entries to the system hosts.
+- Click "Apply" in the title bar, or press <kbd>⌘S</kbd> (macOS) / <kbd>Ctrl+S</kbd> (Windows), to write the content of all effective entries to the system hosts.
 - What gets written: the system hosts content outside the block + a blank line + the managed block. Each entry in the block starts with `# --- <entry title> ---`; a local entry referenced several times is written only once. When nothing is enabled, the block is removed.
 - If the existing hosts file is not UTF-8 encoded, the app refuses to write it so its content is not damaged.
 
@@ -120,7 +111,6 @@ The app first tries to write directly. Without permission:
 
 - **macOS**: an administrator password prompt is shown through `osascript`. After writing, the DNS cache is flushed (`dscacheutil -flushcache`, `killall -HUP mDNSResponder`).
 - **Windows**: the app relaunches itself elevated through UAC (the same binary, which only writes the staged hosts), so the UAC prompt appears. Afterwards `ipconfig /flushdns` runs and the file is read back to confirm its content (antivirus software may block the write). A hosts file locked by another program is reported as such.
-- **Linux**: authorization is requested through `pkexec`.
 
 You can also give the current user write access to the hosts file; then neither writing nor auto-apply asks for authorization.
 
@@ -131,7 +121,7 @@ Windows resolves the hosts file in this order (`src/hosts.rs`):
 1. `hosts` in the directory named by `DataBasePath` under the registry key `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters` (environment variables expanded), if that file exists;
 2. otherwise `System32\drivers\etc\hosts` in the Windows directory returned by `GetSystemWindowsDirectoryW`.
 
-macOS and Linux always use `/etc/hosts`. The file is written with CRLF line endings on Windows and LF elsewhere.
+macOS always uses `/etc/hosts` with LF line endings; Windows writes CRLF.
 
 ### Data location
 
@@ -141,7 +131,6 @@ All data lives in a `SwitchHostsLite` folder in the system configuration directo
 | --- | --- |
 | macOS | `~/Library/Application Support/SwitchHostsLite/` |
 | Windows | `%APPDATA%\SwitchHostsLite\` |
-| Linux | `$XDG_CONFIG_HOME/SwitchHostsLite/` (default `~/.config/SwitchHostsLite/`) |
 
 | File | Content |
 | --- | --- |
@@ -177,7 +166,7 @@ Put theme files in the gpui-component format (`*.json`) in the `themes/` folder 
 
 ## Keyboard shortcuts
 
-| Action | macOS | Windows / Linux |
+| Action | macOS | Windows |
 | --- | --- | --- |
 | Apply to system hosts | <kbd>⌘S</kbd> | <kbd>Ctrl+S</kbd> |
 | Toggle comment | <kbd>⌘/</kbd> or <kbd>Ctrl+/</kbd> | <kbd>Ctrl+/</kbd> |
@@ -195,7 +184,6 @@ The editing shortcuts only work while the editor of a local entry has focus. Und
 
 - The Rust toolchain is pinned in `rust-toolchain.toml` (currently 1.99.1); with [rustup](https://rustup.rs/) installed it is downloaded automatically.
 - **macOS**: Xcode Command Line Tools (`xcode-select --install`).
-- **Linux** (Debian / Ubuntu): run `scripts/install-linux-deps.sh` to install the system libraries gpui needs (X11, Wayland, xkbcommon, fontconfig, freetype, Vulkan, …).
 - **Windows**: the "Desktop development with C++" workload of Visual Studio Build Tools, including MSVC and the Windows SDK (gpui compiles its shaders with the SDK's `fxc`, and `embed-resource` uses the SDK's resource compiler to embed the icon in the exe).
 
 ### Common commands
@@ -226,7 +214,7 @@ The script builds a release binary, writes `Info.plist` (version taken from `Car
    git push origin v0.2.0
    ```
 
-3. `.github/workflows/release.yml` checks that the tag matches the version, builds macOS (arm64, x86_64), Windows (x64, ARM64) and Linux (x86_64), produces the [files listed above](#download-and-install), writes `SHA256SUMS.txt` and `latest.json` with `scripts/release-manifest.py`, and creates the GitHub Release (with generated release notes). It can also be run by hand from the Actions page with an existing tag.
+3. `.github/workflows/release.yml` checks that the tag matches the version, builds macOS (arm64, x86_64) and Windows (x64, ARM64), produces the [files listed above](#download-and-install), writes `SHA256SUMS.txt` and `latest.json` with `scripts/release-manifest.py`, and creates the GitHub Release (with generated release notes). It can also be run by hand from the Actions page with an existing tag.
 4. Tags containing `-` (such as `v1.0.0-beta.1`) are published as pre-releases. The in-app updater reads `releases/latest`, which skips pre-releases, so users never get them.
 
 ### Update source

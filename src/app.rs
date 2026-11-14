@@ -132,7 +132,7 @@ impl SwitchHostsApp {
 
         let editor = Self::new_editor(system_hosts.clone(), window, cx);
 
-        // The window knows the appearance better than the app on Linux.
+        // Re-apply once the window exists, since it knows the current appearance.
         if Settings::global(cx).theme == ThemePref::System {
             preferences::apply_theme(window.appearance(), cx);
         }

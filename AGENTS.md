@@ -10,13 +10,12 @@ cargo test                                   # all unit tests (CI: cargo test --
 cargo clippy --all-targets -- -D warnings    # must be clean (CI: --locked)
 cargo build --release
 scripts/bundle-macos.sh [--target <triple>] [--out <dir>]   # dist/SwitchHosts Lite.app
-scripts/install-linux-deps.sh                # Debian/Ubuntu build deps (CI uses it)
 python3 scripts/release-manifest.py --dir DIR --version X.Y.Z --repo owner/name [--tag vX.Y.Z] [--notes-file F] [--base-url URL]
 ```
 
 - The toolchain is pinned in `rust-toolchain.toml` (1.99.1), and the crate uses edition 2024.
 - The cargo target directory may be overridden by the environment (for example a sandbox cache). Don't hard-code `target/`; ask `cargo metadata --format-version 1 --no-deps` for `target_directory`, as `scripts/bundle-macos.sh` does.
-- CI (`.github/workflows/ci.yml`) runs test and clippy on macOS, Windows and Ubuntu. `.github/workflows/release.yml` runs on `v*` tags: it checks that the tag equals `v` + the `Cargo.toml` version, builds 5 targets, and publishes zip/dmg (lzma, `ULMO`)/tar.xz archives, `SHA256SUMS.txt` and `latest.json`. Tags containing `-` become pre-releases, which the updater never sees.
+- CI (`.github/workflows/ci.yml`) runs test and clippy on macOS and Windows. `.github/workflows/release.yml` runs on `v*` tags: it checks that the tag equals `v` + the `Cargo.toml` version, builds 4 targets, and publishes zip/dmg (lzma, `ULMO`) archives, `SHA256SUMS.txt` and `latest.json`. Tags containing `-` become pre-releases, which the updater never sees.
 - Manual updater test, macOS only and ignored by default: serve a release directory locally (`release-manifest.py --base-url http://127.0.0.1:8765`), then run
   `SHL_TEST_MANIFEST_URL=http://127.0.0.1:8765/latest.json SHL_TEST_BUNDLE=/tmp/x/App.app cargo test simulate_update -- --ignored`.
 - Debug builds only: `SHL_UPDATE_MANIFEST_URL=<url> cargo run` points the updater at a local manifest.
@@ -45,7 +44,7 @@ chmod +x /tmp/fake-rc
 RC=/tmp/fake-rc CC_x86_64_pc_windows_msvc=clang cargo clippy --target x86_64-pc-windows-msvc --all-targets
 ```
 
-The stub answers the resource-compiler probe and creates an empty output file; `clang` stands in for `cl.exe`. This only checks the code; it does not produce a working binary. Linux-only code has no such shortcut, so rely on CI for it.
+The stub answers the resource-compiler probe and creates an empty output file; `clang` stands in for `cl.exe`. This only checks the code; it does not produce a working binary.
 
 ## Architecture
 
@@ -89,7 +88,6 @@ The stub answers the resource-compiler probe and creates an empty output file; `
 - Internally all text is LF without a BOM (`normalize`). `to_native` writes CRLF on Windows. `read_current` refuses non-UTF-8 hosts files instead of rewriting them lossily.
 - `write_raw` tries a direct write first. On `PermissionDenied` it falls back to `write_elevated`:
   - macOS: `osascript … with administrator privileges`, then a DNS cache flush.
-  - Linux: `pkexec sh -c 'cat tmp > /etc/hosts'`.
   - Windows: `ShellExecuteExW` with the `runas` verb starts this same executable with `--elevated-write-hosts <staged file>`, which shows the UAC prompt (`ERROR_CANCELLED` means it was refused). The child handles that argument at the top of `main` via `hosts::run_as_elevated_helper`, writes the staged file over the hosts, flushes DNS and exits, so no UI starts. The result is then read back and verified. Sharing violations are reported as "locked by antivirus". No PowerShell is involved: `-EncodedCommand` plus a hidden elevated `Start-Process` is what Defender's ML heuristics flag as a hosts hijacker.
 - `can_write_directly()` (open for append) gates every automatic write.
 - On Windows, `hosts_path()` comes from the registry `Tcpip\Parameters\DataBasePath` (with env expansion) if `<dir>\hosts` exists, else `GetSystemWindowsDirectoryW()\System32\drivers\etc\hosts`. It is resolved once. The pure helpers (`select_hosts_path`, `join_windows`, `elevated_args`) are `cfg(any(windows, test))` so they are tested on every OS.
@@ -140,10 +138,10 @@ These are pure functions `fn(&str, Range<usize>) -> Option<Edit>` on UTF-8 byte 
 
 - **Source**: `SHL_UPDATE_REPO` at build time, else `CARGO_PKG_REPOSITORY`. The `OWNER` placeholder means "not configured": the menu item is disabled and no checks run. The manifest is `releases/latest/download/latest.json` (`{version, notes, assets: {"<os>-<arch>": {url, sha256, size}}}`), and the platform key is `std::env::consts::{OS, ARCH}`.
 - **Flow**: `init` waits 5 s, removes `.old`/`.new` leftovers, and then checks if `check_updates` is on and the last check was at least 24 h ago. A manual check reports every outcome; an automatic one only reports a found update.
-- **Download**: `download` streams the archive, hashes it with SHA-256, and verifies the size and hash. The HTTP backend is the `mod http` inside `updater.rs`: the system `curl` on macOS and Windows, and `ureq` + rustls (a Linux-only dependency in `Cargo.toml`) elsewhere. Check there for the current per-OS implementation.
+- **Download**: `download` streams the archive, hashes it with SHA-256, and verifies the size and hash. The HTTP backend is the `mod http` inside `updater.rs`, which uses the system `curl`.
 - **Install**:
   - macOS: `ditto -x -k`, check that the new `Info.plist` version matches, strip quarantine, then swap the `.app` bundle (asking for an admin password via osascript if the parent directory isn't writable). Refused for non-bundle (dev) runs and for translocated apps.
-  - Windows/Linux: extract (Windows: `tar.exe`, else PowerShell; Linux: `tar -xf`, which handles `.tar.xz` and `.tar.gz`), then `replace_binary` (Windows renames the running exe to `.old`). Requires the exe's directory to be writable.
+  - Windows: extract with `tar.exe`, else PowerShell, then `replace_binary` renames the running exe to `.old`. Requires the exe's directory to be writable.
 - **Restart**: spawn the relaunch command, then `dispatch_action(&Quit)` so the normal quit path flushes pending saves.
 
 ## Conventions
@@ -171,11 +169,11 @@ These are pure functions `fn(&str, Range<usize>) -> Option<Edit>` on UTF-8 byte 
 - **Theme files only override the fields they name.** Before switching, `reset_theme_file_fields` restores font, radius, shadow and highlight theme to their defaults so that nothing leaks from the previous theme.
 - **Missing icons.** gpui-kit's default icon bundle lacks some Lucide icons. Register them in `icon_assets!(ExtraIcons, [...])` in `main.rs`.
 - **Focus.** Without a focused element, key bindings dispatch from the window root and never reach the view's actions. `render` focuses the app's `focus_handle` when nothing is focused.
-- **Linux appearance.** On Linux the window knows the appearance better than the app, so `SwitchHostsApp::new` re-applies the theme with `window.appearance()`.
+- **System appearance at startup.** `SwitchHostsApp::new` re-applies the theme with `window.appearance()` when the preference is System, since the window knows the current appearance.
 
 ## Safety
 
 - **Never write the real system hosts from tests or scripts.** `hosts::build`, `normalize` and the other helpers are pure; test those. `apply`, `write_raw` and `write_elevated` touch `/etc/hosts` or the Windows hosts file.
 - Tests that need files use `std::env::temp_dir()` with a unique name and clean up after themselves. Don't write into `data_dir()` from tests.
-- For manual experiments with app data, point the data directory at a temp location so the real `data.json` and history aren't touched. On Linux, use `XDG_CONFIG_HOME=$(mktemp -d) cargo run`. On macOS, build first and run the binary with a temp `HOME`, e.g. `HOME=$(mktemp -d) "<target_dir>/debug/switch-hosts-lite"`; running `cargo` itself with a fake `HOME` breaks rustup. Applying hosts still writes the real system file.
+- For manual experiments with app data, point the data directory at a temp location so the real `data.json` and history aren't touched. On macOS, build first and run the binary with a temp `HOME`, e.g. `HOME=$(mktemp -d) "<target_dir>/debug/switch-hosts-lite"`; running `cargo` itself with a fake `HOME` breaks rustup. Applying hosts still writes the real system file.
 - Don't change the data file formats incompatibly. `data.json`, `settings.json` and `history.json` are read with `serde(default)`, so add new fields with defaults.

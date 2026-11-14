@@ -296,26 +296,6 @@ fn write_elevated(content: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn write_elevated(content: &str) -> Result<()> {
-    let tmp = write_tmp(content)?;
-    let status = std::process::Command::new("pkexec")
-        .args(["sh", "-c", &format!("cat '{}' > /etc/hosts", tmp.display())])
-        .status()
-        .map_err(|err| LocalizedError::new("err_launch").arg("program", "pkexec").detail(err))?;
-    let _ = fs::remove_file(&tmp);
-    match status.code() {
-        Some(0) => {}
-        // pkexec exits with 126 when the authentication dialog was dismissed.
-        Some(126) => return Err(LocalizedError::new("err_auth_cancelled").into()),
-        code => {
-            let code = code.map_or_else(|| "?".to_string(), |c| c.to_string());
-            return Err(LocalizedError::new("err_auth_failed_code").arg("code", code).into());
-        }
-    }
-    Ok(())
-}
-
 /// Argument that marks the elevated child started by `write_elevated`:
 /// `--elevated-write-hosts <staged file>`.
 #[cfg(any(windows, test))]

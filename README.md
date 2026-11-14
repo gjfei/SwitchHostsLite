@@ -13,7 +13,7 @@
   <a href="https://github.com/gjfei/SwitchHostsLite/releases/latest"><img src="https://img.shields.io/github/v/release/gjfei/SwitchHostsLite?sort=semver" alt="Release"></a>
 </p>
 
-SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻量版：用 Rust 和 [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component)（通过 `gpui-kit`）写成的原生桌面应用，不依赖 Electron 或 WebView。它保留了 SwitchHosts 的核心用法——把 hosts 规则分成多个方案，按需开关并写入系统 hosts——并且能导入 SwitchHosts 的备份。支持 macOS、Windows 和 Linux。
+SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻量版：用 Rust 和 [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component)（通过 `gpui-kit`）写成的原生桌面应用，不依赖 Electron 或 WebView。它保留了 SwitchHosts 的核心用法——把 hosts 规则分成多个方案，按需开关并写入系统 hosts——并且能导入 SwitchHosts 的备份。支持 macOS 和 Windows。
 
 ## 功能
 
@@ -57,7 +57,6 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 | macOS Intel | `SwitchHostsLite-<版本>-macos-x86_64.dmg` 或 `.zip` |
 | Windows x64 | `SwitchHostsLite-<版本>-windows-x86_64.zip` |
 | Windows ARM64 | `SwitchHostsLite-<版本>-windows-aarch64.zip` |
-| Linux x86_64 | `SwitchHostsLite-<版本>-linux-x86_64.tar.xz` |
 
 每个版本还附带 `SHA256SUMS.txt`（所有文件的校验和）和 `latest.json`（供应用内更新使用）。
 
@@ -79,14 +78,6 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 - Windows Defender 偶尔会把未签名的 exe 误报为木马（检测名以 `!ml` 结尾的多为机器学习误报）。可在 [Microsoft 提交文件分析](https://www.microsoft.com/en-us/wdsi/filesubmission) 反馈，或临时把程序加入 Defender 排除项。
 - 自动更新会替换 exe 所在目录中的文件，请把它放在当前用户可写的目录（例如不要放在 `C:\Program Files` 下）。
 - 自动更新通过系统自带的 `curl.exe` 下载（Windows 10 1803 及以上版本自带）。
-
-### Linux
-
-- 用 `tar -xf SwitchHostsLite-<版本>-linux-x86_64.tar.xz` 解压。压缩包内有可执行文件 `switch-hosts-lite`、桌面文件 `switch-hosts-lite.desktop` 和图标 `switch-hosts-lite.png`，可以自行放到 `~/.local/bin`、`~/.local/share/applications` 等位置。
-- 发布包在 Ubuntu 24.04 上构建，需要不低于该版本的 glibc。
-- 运行需要 X11 或 Wayland 桌面、可用的显卡驱动（gpui 通过 wgpu 渲染，一般需要 Vulkan），以及 `libxkbcommon`、`fontconfig`、`freetype` 等常见桌面库。
-- 写入 `/etc/hosts` 时通过 `pkexec` 提权，需要系统中有 polkit 及其认证代理（主流桌面环境默认自带）。
-- 与 Windows 一样，自动更新需要可执行文件所在目录对当前用户可写。
 
 ## 使用说明
 
@@ -110,7 +101,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 ### 应用到系统 hosts
 
 - 打开或关闭方案的开关会立即写入。
-- 点击标题栏的「应用」按钮，或按 <kbd>⌘S</kbd>（macOS）/ <kbd>Ctrl+S</kbd>（Windows、Linux），把所有已生效方案的内容写入系统 hosts。
+- 点击标题栏的「应用」按钮，或按 <kbd>⌘S</kbd>（macOS）/ <kbd>Ctrl+S</kbd>（Windows），把所有已生效方案的内容写入系统 hosts。
 - 写入的内容为：系统 hosts 中区块之外的原有内容 + 一个空行 + 受管理的区块。区块中每个方案以 `# --- <方案标题> ---` 开头；同一个本地方案即使被多次引用也只写入一次。没有任何生效方案时，区块会被移除。
 - 如果现有的 hosts 文件不是 UTF-8 编码，应用会拒绝写入，以免破坏原有内容。
 
@@ -120,7 +111,6 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 
 - **macOS**：通过 `osascript` 弹出管理员密码对话框，写入后刷新 DNS 缓存（`dscacheutil -flushcache`、`killall -HUP mDNSResponder`）。
 - **Windows**：通过 UAC 以管理员身份重新启动应用自身来写入（会弹出 UAC 提示）；写入后执行 `ipconfig /flushdns`，并回读文件确认内容一致（防止被杀毒软件拦截）。hosts 被其他程序占用时会给出提示。
-- **Linux**：通过 `pkexec` 请求授权。
 
 你也可以自行让当前用户对 hosts 文件拥有写权限，这样写入和自动应用都不会再弹出授权提示。
 
@@ -131,7 +121,7 @@ Windows 按以下顺序确定 hosts 文件（`src/hosts.rs`）：
 1. 注册表 `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters` 中的 `DataBasePath`（展开环境变量）目录下的 `hosts`，前提是这个文件存在；
 2. 否则使用 `GetSystemWindowsDirectoryW` 返回的 Windows 目录下的 `System32\drivers\etc\hosts`。
 
-macOS 和 Linux 固定为 `/etc/hosts`。Windows 上写入时使用 CRLF 换行，其他平台使用 LF。
+macOS 固定为 `/etc/hosts`，使用 LF 换行；Windows 上使用 CRLF 换行。
 
 ### 数据位置
 
@@ -141,7 +131,6 @@ macOS 和 Linux 固定为 `/etc/hosts`。Windows 上写入时使用 CRLF 换行�
 | --- | --- |
 | macOS | `~/Library/Application Support/SwitchHostsLite/` |
 | Windows | `%APPDATA%\SwitchHostsLite\` |
-| Linux | `$XDG_CONFIG_HOME/SwitchHostsLite/`（默认 `~/.config/SwitchHostsLite/`） |
 
 | 文件 | 内容 |
 | --- | --- |
@@ -177,7 +166,7 @@ macOS 和 Linux 固定为 `/etc/hosts`。Windows 上写入时使用 CRLF 换行�
 
 ## 快捷键
 
-| 操作 | macOS | Windows / Linux |
+| 操作 | macOS | Windows |
 | --- | --- | --- |
 | 应用到系统 hosts | <kbd>⌘S</kbd> | <kbd>Ctrl+S</kbd> |
 | 切换注释 | <kbd>⌘/</kbd> 或 <kbd>Ctrl+/</kbd> | <kbd>Ctrl+/</kbd> |
@@ -195,7 +184,6 @@ macOS 和 Linux 固定为 `/etc/hosts`。Windows 上写入时使用 CRLF 换行�
 
 - Rust 工具链版本固定在 `rust-toolchain.toml`（当前为 1.99.1），安装 [rustup](https://rustup.rs/) 后会自动下载。
 - **macOS**：Xcode Command Line Tools（`xcode-select --install`）。
-- **Linux**（Debian / Ubuntu）：运行 `scripts/install-linux-deps.sh` 安装 gpui 需要的系统库（X11、Wayland、xkbcommon、fontconfig、freetype、Vulkan 等）。
 - **Windows**：安装 Visual Studio Build Tools 中的「使用 C++ 的桌面开发」工作负载，包括 MSVC 和 Windows SDK（gpui 用 SDK 中的 `fxc` 编译着色器，`embed-resource` 用 SDK 中的资源编译器把图标嵌入 exe）。
 
 ### 常用命令
@@ -226,7 +214,7 @@ scripts/bundle-macos.sh --target x86_64-apple-darwin --out dist
    git push origin v0.2.0
    ```
 
-3. `.github/workflows/release.yml` 会先检查标签和版本号是否一致，然后构建 macOS（arm64、x86_64）、Windows（x64、ARM64）和 Linux（x86_64），生成[上面列出的文件](#下载安装)，再用 `scripts/release-manifest.py` 生成 `SHA256SUMS.txt` 和 `latest.json`，最后创建 GitHub Release（更新说明自动生成）。也可以在 Actions 页面手动运行，输入一个已有的标签。
+3. `.github/workflows/release.yml` 会先检查标签和版本号是否一致，然后构建 macOS（arm64、x86_64）和 Windows（x64、ARM64），生成[上面列出的文件](#下载安装)，再用 `scripts/release-manifest.py` 生成 `SHA256SUMS.txt` 和 `latest.json`，最后创建 GitHub Release（更新说明自动生成）。也可以在 Actions 页面手动运行，输入一个已有的标签。
 4. 带 `-` 的标签（例如 `v1.0.0-beta.1`）会发布为预发布版本。应用内更新读取的是 `releases/latest`，会跳过预发布版本，所以用户不会收到这些版本。
 
 ### 更新源
