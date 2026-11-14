@@ -34,7 +34,7 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
 - **Themes**: follow system / light / dark. 36 bundled color themes (11 light, 25 dark, from gpui-component), chosen separately for light and dark mode, plus your own theme files.
 - **Languages**: Simplified Chinese, Traditional Chinese and English, following the system language by default.
 - **Auto-apply**: while you edit a local entry, its content is written about 1 second after you stop typing. Adding, deleting, moving or editing entries is written right away too. Both kinds of automatic writes **only happen when no password is needed** (the current user can write the hosts file directly). Otherwise the UI shows "Unapplied changes" and waits for you to apply.
-- **Auto-update**: at startup the app looks for a new release on GitHub Releases (at most once a day; can be turned off in Preferences). The download is checked against its size and SHA-256, swapped in place, and the app restarts.
+- **Auto-update**: at startup the app looks for a new release on GitHub Releases (at most once a day; can be turned off in Preferences). The download is checked against its size and SHA-256 and installed, then the app restarts. On Windows the installer runs silently and asks for administrator rights; cancelling leaves the current version in place and reopens the app.
 - **Low resource usage**: native rendering in a single executable, with far lower memory use and download size than the Electron-based SwitchHosts. The caret stops blinking after about 10 seconds of inactivity, so the window is not redrawn continuously for it.
 
 ## Differences from SwitchHosts
@@ -55,8 +55,8 @@ Download the file for your platform from [GitHub Releases](https://github.com/gj
 | --- | --- |
 | macOS, Apple silicon | `SwitchHostsLite-<version>-macos-aarch64.dmg` or `.zip` |
 | macOS, Intel | `SwitchHostsLite-<version>-macos-x86_64.dmg` or `.zip` |
-| Windows x64 | `SwitchHostsLite-<version>-windows-x86_64.zip` |
-| Windows ARM64 | `SwitchHostsLite-<version>-windows-aarch64.zip` |
+| Windows x64 | `SwitchHostsLite-<version>-windows-x86_64-setup.exe` |
+| Windows ARM64 | `SwitchHostsLite-<version>-windows-aarch64-setup.exe` |
 
 Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest.json` (used by the in-app updater).
 
@@ -73,11 +73,10 @@ Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest
 
 ### Windows
 
-- Unzip and run `switch-hosts-lite.exe`; no installation needed.
+- Run `SwitchHostsLite-<version>-windows-x86_64-setup.exe` (`-windows-aarch64-setup.exe` on ARM64). The installer asks for administrator rights, installs to `C:\Program Files\SwitchHostsLite` by default (the directory can be changed), adds Start Menu and desktop shortcuts for all users, and uninstalls from Settings → Apps.
 - The exe is not code-signed, so SmartScreen may say "Windows protected your PC". Click "More info → Run anyway".
 - Windows Defender occasionally flags the unsigned exe as a trojan; detection names ending in `!ml` are usually machine-learning false positives. Report it via the [Microsoft file submission](https://www.microsoft.com/en-us/wdsi/filesubmission) or temporarily add the app to Defender's exclusions.
-- Auto-update replaces the files next to the exe, so keep it in a directory the current user can write to (for example, not under `C:\Program Files`).
-- Auto-update downloads with the system `curl.exe`, which ships with Windows 10 1803 and later.
+- By default the app is installed under `Program Files`, which ordinary users cannot write to. In-app updates download the installer, run it silently with administrator rights after the app exits, and start the new version (UAC appears; cancelling keeps the current version).
 
 ## Usage
 

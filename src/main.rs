@@ -46,10 +46,13 @@ impl AssetSource for AppAssets {
 }
 
 fn main() {
-    // The elevated child that `hosts::write_elevated` starts only writes the
-    // staged hosts, then exits; it must not start the app.
+    // The helpers that `hosts::write_elevated` and the updater start do their
+    // work and exit; they must not start the app.
     #[cfg(windows)]
-    hosts::run_as_elevated_helper();
+    {
+        hosts::run_as_elevated_helper();
+        updater::run_update_installer_helper();
+    }
 
     gpui_kit::application()
         .with_assets(AppAssets)

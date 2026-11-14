@@ -34,7 +34,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 - **主题**：跟随系统 / 浅色 / 深色；内置 36 套配色（11 套浅色、25 套深色，来自 gpui-component），浅色和深色可以分别选择；也可以放入自定义主题文件。
 - **多语言**：简体中文、繁體中文、English，默认跟随系统语言。
 - **自动应用**：编辑本地方案的内容时，停止输入约 1 秒后自动写入；增删、移动、修改方案等改动也会直接写入。这两种自动写入**只在无需输入密码**（当前用户可以直接写 hosts 文件）时进行，否则界面显示「有未应用的更改」，等你手动应用。
-- **自动更新**：启动后检查 GitHub Releases 上的新版本（每天最多一次，可在偏好设置中关闭），下载后校验大小和 SHA-256，原地替换并重启。
+- **自动更新**：启动后检查 GitHub Releases 上的新版本（每天最多一次，可在偏好设置中关闭），下载后校验大小和 SHA-256 并安装，然后重启应用。Windows 上会静默运行安装程序并请求管理员权限；取消授权时保留当前版本并重新打开应用。
 - **资源占用低**：原生渲染、单个可执行文件，内存占用和安装包体积都远小于 Electron 版 SwitchHosts；空闲约 10 秒后光标停止闪烁，不再因此持续重绘窗口。
 
 ## 与 SwitchHosts 的差异
@@ -55,8 +55,8 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 | --- | --- |
 | macOS Apple 芯片 | `SwitchHostsLite-<版本>-macos-aarch64.dmg` 或 `.zip` |
 | macOS Intel | `SwitchHostsLite-<版本>-macos-x86_64.dmg` 或 `.zip` |
-| Windows x64 | `SwitchHostsLite-<版本>-windows-x86_64.zip` |
-| Windows ARM64 | `SwitchHostsLite-<版本>-windows-aarch64.zip` |
+| Windows x64 | `SwitchHostsLite-<版本>-windows-x86_64-setup.exe` |
+| Windows ARM64 | `SwitchHostsLite-<版本>-windows-aarch64-setup.exe` |
 
 每个版本还附带 `SHA256SUMS.txt`（所有文件的校验和）和 `latest.json`（供应用内更新使用）。
 
@@ -73,11 +73,10 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 
 ### Windows
 
-- 解压后直接运行 `switch-hosts-lite.exe`，无需安装。
+- 运行 `SwitchHostsLite-<版本>-windows-x86_64-setup.exe`（ARM64 对应 `-windows-aarch64-setup.exe`）安装：安装程序会请求管理员权限，默认装到 `C:\Program Files\SwitchHostsLite`（安装时可以更改目录），为所有用户创建开始菜单和桌面快捷方式，可在「设置 → 应用」中卸载。
 - 程序没有代码签名，SmartScreen 可能提示「Windows 已保护你的电脑」，点击「更多信息 → 仍要运行」即可。
 - Windows Defender 偶尔会把未签名的 exe 误报为木马（检测名以 `!ml` 结尾的多为机器学习误报）。可在 [Microsoft 提交文件分析](https://www.microsoft.com/en-us/wdsi/filesubmission) 反馈，或临时把程序加入 Defender 排除项。
-- 自动更新会替换 exe 所在目录中的文件，请把它放在当前用户可写的目录（例如不要放在 `C:\Program Files` 下）。
-- 自动更新通过系统自带的 `curl.exe` 下载（Windows 10 1803 及以上版本自带）。
+- 应用默认安装到 `Program Files` 下，普通用户不能直接改写安装目录；应用内更新会下载安装包，在退出后以管理员权限静默安装，然后重新启动新版本（会出现 UAC 提示，取消则保留当前版本）。
 
 ## 使用说明
 

@@ -15,7 +15,7 @@ python3 scripts/release-manifest.py --dir DIR --version X.Y.Z --repo owner/name 
 
 - The toolchain is pinned in `rust-toolchain.toml` (1.99.1), and the crate uses edition 2024.
 - The cargo target directory may be overridden by the environment (for example a sandbox cache). Don't hard-code `target/`; ask `cargo metadata --format-version 1 --no-deps` for `target_directory`, as `scripts/bundle-macos.sh` does.
-- CI (`.github/workflows/ci.yml`) runs test and clippy on macOS and Windows. `.github/workflows/release.yml` runs on `v*` tags: it checks that the tag equals `v` + the `Cargo.toml` version, builds 4 targets, and publishes zip/dmg (lzma, `ULMO`) archives, `SHA256SUMS.txt` and `latest.json`. Tags containing `-` become pre-releases, which the updater never sees.
+- CI (`.github/workflows/ci.yml`) runs test and clippy on macOS and Windows. `.github/workflows/release.yml` runs on `v*` tags: it checks that the tag equals `v` + the `Cargo.toml` version, builds 4 targets, and publishes macOS zip/dmg (lzma, `ULMO`) archives and Windows `-setup.exe` installers (`scripts/windows/installer.nsi`, the Windows updater asset), `SHA256SUMS.txt` and `latest.json`. Tags containing `-` become pre-releases, which the updater never sees.
 - Manual updater test, macOS only and ignored by default: serve a release directory locally (`release-manifest.py --base-url http://127.0.0.1:8765`), then run
   `SHL_TEST_MANIFEST_URL=http://127.0.0.1:8765/latest.json SHL_TEST_BUNDLE=/tmp/x/App.app cargo test simulate_update -- --ignored`.
 - Debug builds only: `SHL_UPDATE_MANIFEST_URL=<url> cargo run` points the updater at a local manifest.
@@ -48,7 +48,7 @@ The stub answers the resource-compiler probe and creates an empty output file; `
 
 ## Architecture
 
-`src/main.rs` registers the modules, installs `AppAssets` (the default gpui-kit icon bundle plus the extra Lucide icons declared with `icon_assets!(ExtraIcons, [...])`; add an icon there if `IconName::X` renders blank), and then runs `themes::load` → `app::init` → `app::bind_keys` → opens the window → `updater::init`. On Windows it first calls `hosts::run_as_elevated_helper`, which only returns for an ordinary launch. The app quits when the last window closes (`Quit` is bound to cmd-q, plus ctrl-q off macOS).
+`src/main.rs` registers the modules, installs `AppAssets` (the default gpui-kit icon bundle plus the extra Lucide icons declared with `icon_assets!(ExtraIcons, [...])`; add an icon there if `IconName::X` renders blank), and then runs `themes::load` → `app::init` → `app::bind_keys` → opens the window → `updater::init`. On Windows it first calls `hosts::run_as_elevated_helper` and `updater::run_update_installer_helper`, which only return for an ordinary launch. The app quits when the last window closes (`Quit` is bound to cmd-q, plus ctrl-q off macOS).
 
 | Module | Responsibility |
 | --- | --- |
@@ -88,7 +88,7 @@ The stub answers the resource-compiler probe and creates an empty output file; `
 - Internally all text is LF without a BOM (`normalize`). `to_native` writes CRLF on Windows. `read_current` refuses non-UTF-8 hosts files instead of rewriting them lossily.
 - `write_raw` tries a direct write first. On `PermissionDenied` it falls back to `write_elevated`:
   - macOS: `osascript … with administrator privileges`, then a DNS cache flush.
-  - Windows: `ShellExecuteExW` with the `runas` verb starts this same executable with `--elevated-write-hosts <staged file>`, which shows the UAC prompt (`ERROR_CANCELLED` means it was refused). The child handles that argument at the top of `main` via `hosts::run_as_elevated_helper`, writes the staged file over the hosts, flushes DNS and exits, so no UI starts. The result is then read back and verified. Sharing violations are reported as "locked by antivirus". No PowerShell is involved: `-EncodedCommand` plus a hidden elevated `Start-Process` is what Defender's ML heuristics flag as a hosts hijacker.
+  - Windows: `ShellExecuteExW` with the `runas` verb starts this same executable with `--elevated-write-hosts <staged file>`, which shows the UAC prompt (`ERROR_CANCELLED` means it was refused). The child handles that argument at the top of `main` via `hosts::run_as_elevated_helper`, writes the staged file over the hosts, flushes DNS and exits, so no UI starts. The result is then read back and verified. Sharing violations are reported as "locked by antivirus". No PowerShell is involved: `-EncodedCommand` plus a hidden elevated `Start-Process` is what Defender's ML heuristics flag as a hosts hijacker. The launcher itself is `run_elevated_process`, which the updater reuses for the installer.
 - `can_write_directly()` (open for append) gates every automatic write.
 - On Windows, `hosts_path()` comes from the registry `Tcpip\Parameters\DataBasePath` (with env expansion) if `<dir>\hosts` exists, else `GetSystemWindowsDirectoryW()\System32\drivers\etc\hosts`. It is resolved once. The pure helpers (`select_hosts_path`, `join_windows`, `elevated_args`) are `cfg(any(windows, test))` so they are tested on every OS.
 
@@ -137,11 +137,11 @@ These are pure functions `fn(&str, Range<usize>) -> Option<Edit>` on UTF-8 byte 
 ### updater.rs
 
 - **Source**: `SHL_UPDATE_REPO` at build time, else `CARGO_PKG_REPOSITORY`. The `OWNER` placeholder means "not configured": the menu item is disabled and no checks run. The manifest is `releases/latest/download/latest.json` (`{version, notes, assets: {"<os>-<arch>": {url, sha256, size}}}`), and the platform key is `std::env::consts::{OS, ARCH}`.
-- **Flow**: `init` waits 5 s, removes `.old`/`.new` leftovers, and then checks if `check_updates` is on and the last check was at least 24 h ago. A manual check reports every outcome; an automatic one only reports a found update.
+- **Flow**: `init` waits 5 s, removes `.old`/`.new` leftovers and stale `switch-hosts-lite-update-*` directories in the temp dir, and then checks if `check_updates` is on and the last check was at least 24 h ago. A manual check reports every outcome; an automatic one only reports a found update.
 - **Download**: `download` streams the archive, hashes it with SHA-256, and verifies the size and hash. The HTTP backend is the `mod http` inside `updater.rs`, which uses the system `curl`.
 - **Install**:
   - macOS: `ditto -x -k`, check that the new `Info.plist` version matches, strip quarantine, then swap the `.app` bundle (asking for an admin password via osascript if the parent directory isn't writable). Refused for non-bundle (dev) runs and for translocated apps.
-  - Windows: extract with `tar.exe`, else PowerShell, then `replace_binary` renames the running exe to `.old`. Requires the exe's directory to be writable.
+  - Windows: a `-setup.exe` asset is handed to a detached copy of this exe (`--install-update <setup> <exe> <pid>`), because the installed image cannot be overwritten while it runs and the helper must not be that image. The copy waits for the app's process to exit, runs the installer with `/S` elevated through `hosts::run_elevated_process` (UAC; a cancelled elevation keeps the old version), deletes the installer, and starts the app again unelevated. The work directory is left to `remove_stale_update_dirs` on a later startup. A `.zip` asset (no longer published; older Windows builds only understand this path) is extracted with `tar.exe`, else PowerShell, then `replace_binary` renames the running exe to `.old`; that path requires the exe's directory to be writable.
 - **Restart**: spawn the relaunch command, then `dispatch_action(&Quit)` so the normal quit path flushes pending saves.
 
 ## Conventions

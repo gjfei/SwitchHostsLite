@@ -2,15 +2,17 @@
 """Write latest.json and SHA256SUMS.txt for the release assets in a directory.
 
 The app's updater downloads latest.json from the latest release and picks the
-archive for its platform (`<os>-<arch>`, e.g. macos-aarch64) from `assets`.
+file for its platform (`<os>-<arch>`, e.g. macos-aarch64) from `assets`: a
+.zip archive on macOS, the -setup.exe installer on Windows.
 
 Usage:
   scripts/release-manifest.py --dir DIR --version 1.2.3 --repo owner/name \
       [--tag v1.2.3] [--notes-file notes.md] [--base-url URL]
 
-Archives must be named SwitchHostsLite-<version>-<os>-<arch>.(zip|tar.gz|tar.xz);
-other files (e.g. .dmg) only go into SHA256SUMS.txt. --base-url replaces the
-GitHub download URL, for testing against a local server.
+Updater packages must be named SwitchHostsLite-<version>-<os>-<arch>.zip or
+SwitchHostsLite-<version>-<os>-<arch>-setup.exe; other files (e.g. .dmg) only
+go into SHA256SUMS.txt. --base-url replaces the GitHub download URL, for
+testing against a local server.
 """
 
 import argparse
@@ -44,7 +46,7 @@ def main() -> int:
     base_url = (args.base_url or f"https://github.com/{args.repo}/releases/download/{tag}").rstrip("/")
     notes = args.notes_file.read_text(encoding="utf-8").strip() if args.notes_file else ""
     pattern = re.compile(
-        rf"^SwitchHostsLite-{re.escape(args.version)}-(?P<key>[a-z]+-[a-z0-9_]+)\.(zip|tar\.gz|tar\.xz)$"
+        rf"^SwitchHostsLite-{re.escape(args.version)}-(?P<key>[a-z]+-[a-z0-9_]+?)(?:-setup)?\.(?:zip|exe)$"
     )
 
     files = sorted(
@@ -57,7 +59,7 @@ def main() -> int:
             continue
         key = match["key"]
         if key in assets:
-            print(f"error: two archives for {key}", file=sys.stderr)
+            print(f"error: two packages for {key}", file=sys.stderr)
             return 1
         assets[key] = {
             "url": f"{base_url}/{path.name}",
@@ -65,7 +67,7 @@ def main() -> int:
             "size": path.stat().st_size,
         }
     if not assets:
-        print(f"error: no SwitchHostsLite-{args.version}-* archives in {args.dir}", file=sys.stderr)
+        print(f"error: no SwitchHostsLite-{args.version}-* packages in {args.dir}", file=sys.stderr)
         return 1
 
     manifest = {

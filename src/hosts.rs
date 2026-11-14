@@ -395,13 +395,37 @@ fn write_elevated(content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Start this executable with the `runas` verb and wait for it. The child is
-/// the elevated helper of `run_as_elevated_helper`; Windows shows the UAC
-/// prompt and its dialog reports a refused elevation.
+/// Start this executable with `--elevated-write-hosts` and the staged hosts,
+/// showing the UAC prompt, and check that the helper succeeded.
 #[cfg(windows)]
 fn run_elevated(src: &Path) -> Result<()> {
+    use std::ffi::OsString;
+    let exe = std::env::current_exe()
+        .map_err(|err| LocalizedError::new("err_auth_failed").detail(err))?;
+    // Windows splits this with CommandLineToArgvW, which, unlike `cmd`, does
+    // not expand `%`, so a temp path containing one survives. NTFS forbids `"`
+    // in names, so the surrounding quotes cannot be escaped away.
+    let mut params = OsString::from(ELEVATED_WRITE_ARG);
+    params.push(" \"");
+    params.push(src.as_os_str());
+    params.push("\"");
+    let code = run_elevated_process(&exe, &params, "err_write_hosts")?;
+    debug_assert_eq!(code, 0);
+    Ok(())
+}
+
+/// Start `program` with the `runas` verb and `params`, wait for it, and return
+/// its exit code. Windows shows the UAC prompt; a refused elevation is an
+/// error. A nonzero exit code is `Err` with `exit_key`. The child runs hidden:
+/// callers either show no UI of their own or the child is a silent helper.
+#[cfg(windows)]
+pub(crate) fn run_elevated_process(
+    program: &Path,
+    params: &std::ffi::OsStr,
+    exit_key: &'static str,
+) -> Result<u32> {
     use std::{
-        ffi::{OsStr, OsString},
+        ffi::OsStr,
         mem,
         os::windows::ffi::OsStrExt as _,
         ptr,
@@ -425,18 +449,9 @@ fn run_elevated(src: &Path) -> Result<()> {
         s.encode_wide().chain([0]).collect()
     }
 
-    let exe = std::env::current_exe()
-        .map_err(|err| LocalizedError::new("err_auth_failed").detail(err))?;
-    // Windows splits this with CommandLineToArgvW, which, unlike `cmd`, does
-    // not expand `%`, so a temp path containing one survives. NTFS forbids `"`
-    // in names, so the surrounding quotes cannot be escaped away.
-    let mut params = OsString::from(ELEVATED_WRITE_ARG);
-    params.push(" \"");
-    params.push(src.as_os_str());
-    params.push("\"");
     let verb = wide(OsStr::new("runas"));
-    let file = wide(exe.as_os_str());
-    let params = wide(&params);
+    let file = wide(program.as_os_str());
+    let params = wide(params);
 
     // ShellExecuteExW needs an STA thread. A fresh one keeps the UI thread's
     // COM state untouched and matches the synchronous write path.
@@ -489,9 +504,9 @@ fn run_elevated(src: &Path) -> Result<()> {
                         .into());
                 }
                 if code == 0 {
-                    Ok(())
+                    Ok(0)
                 } else {
-                    Err(LocalizedError::new("err_write_hosts")
+                    Err(LocalizedError::new(exit_key)
                         .detail(format!("elevated helper exit code {code}"))
                         .into())
                 }

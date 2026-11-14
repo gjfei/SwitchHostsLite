@@ -1,9 +1,10 @@
 //! Update checks and self-updates from the GitHub releases of this app.
 //!
-//! Every release carries a `latest.json` manifest naming one archive per
+//! Every release carries a `latest.json` manifest naming one package per
 //! platform with its size and SHA-256 (see `.github/workflows/release.yml`).
-//! An update downloads that archive, verifies it, swaps it in place of the
-//! running app and restarts.
+//! An update downloads that package and verifies it, installs it over the
+//! running app (a `.app` bundle on macOS, the `-setup.exe` installer on
+//! Windows) and restarts.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -47,8 +48,6 @@ const MAX_MANIFEST_BYTES: u64 = 1 << 20;
 const MAX_NOTES_CHARS: usize = 4000;
 #[cfg(target_os = "windows")]
 const PACKAGE_BINARY: &str = "switch-hosts-lite.exe";
-#[cfg(target_os = "linux")]
-const PACKAGE_BINARY: &str = "switch-hosts-lite";
 
 // -- update source -------------------------------------------------------------
 
@@ -326,41 +325,6 @@ mod http {
     }
 }
 
-/// HTTP(S) GET with ureq and rustls, as curl is not installed everywhere.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-mod http {
-    use std::io::{self, Read};
-    use std::time::Duration;
-
-    pub struct Body(ureq::BodyReader<'static>);
-
-    /// Start a GET of `url` that fails on an HTTP error status, after
-    /// `timeout` or when the body is longer than `max_len`.
-    pub fn get(url: &str, timeout: Duration, max_len: u64) -> io::Result<Body> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_connect(Some(super::CONNECT_TIMEOUT))
-            .timeout_global(Some(timeout))
-            .user_agent(super::USER_AGENT)
-            .build()
-            .into();
-        let response = agent.get(url).call().map_err(io::Error::other)?;
-        // ureq refuses a body as long as the limit itself.
-        Ok(Body(response.into_body().into_with_config().limit(max_len + 1).reader()))
-    }
-
-    impl Read for Body {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            self.0.read(buf)
-        }
-    }
-
-    impl Body {
-        pub fn finish(self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-}
-
 fn fetch_manifest(url: &str) -> Result<Manifest> {
     let mut body = http::get(url, MANIFEST_TIMEOUT, MAX_MANIFEST_BYTES).localize("err_network")?;
     let mut text = String::new();
@@ -531,7 +495,7 @@ fn bundle_root(exe: &Path) -> Option<PathBuf> {
 
 /// A `/bin/sh` command that waits for this process to exit, then runs
 /// `script` with the given path as `$0`.
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn relaunch_command(script: &str, path: &Path) -> Command {
     use std::os::unix::process::CommandExt as _;
     let wait = "i=0; while kill -0 \"$1\" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done";
@@ -641,12 +605,16 @@ fn install(archive: &Path, work: &Path, version: &str) -> Result<Command> {
         return Err(LocalizedError::new("err_update_translocated").into());
     }
     install_macos(archive, work, &bundle, version)?;
+    let _ = fs::remove_dir_all(work);
     Ok(relaunch_command("open \"$0\"", &bundle))
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(target_os = "windows")]
 fn install(archive: &Path, work: &Path, _version: &str) -> Result<Command> {
     let exe = std::env::current_exe().localize("err_update_install")?;
+    if archive.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+        return install_from_setup(archive, work, &exe);
+    }
     let dir = exe.parent().ok_or_else(|| LocalizedError::new("err_update_install"))?;
     if !is_writable(dir) {
         return Err(LocalizedError::new("err_update_not_writable").arg("dir", dir.display()).into());
@@ -658,18 +626,119 @@ fn install(archive: &Path, work: &Path, _version: &str) -> Result<Command> {
     let is_binary = |p: &Path| p.is_file() && p.file_name().is_some_and(|n| n == PACKAGE_BINARY);
     let new = find_entry(&staging, &is_binary).ok_or_else(|| LocalizedError::new("err_update_invalid_package"))?;
     replace_binary(&new, &exe)?;
+    let _ = fs::remove_dir_all(work);
     Ok(start_command(&exe))
 }
 
-/// Unpack a `.tar.xz` or `.tar.gz`; tar picks the decompressor.
-#[cfg(target_os = "linux")]
-fn extract(archive: &Path, dest: &Path) -> Result<()> {
-    run(Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(dest), "err_update_extract")
+/// Argument that marks the detached helper started by `install_from_setup`:
+/// `--install-update <setup> <exe> <pid>`.
+#[cfg(any(windows, test))]
+const UPDATE_INSTALL_ARG: &str = "--install-update";
+
+/// The command line of the update helper, besides the program itself.
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum InstallerArgs {
+    /// An ordinary launch.
+    Normal,
+    /// The helper was started with a malformed command line.
+    Invalid,
+    /// Install `setup` once process `pid` has exited, then start `exe`.
+    Install { setup: PathBuf, exe: PathBuf, pid: u32 },
 }
 
-#[cfg(target_os = "linux")]
-fn start_command(exe: &Path) -> Command {
-    relaunch_command("exec \"$0\"", exe)
+/// Only exactly the flag and its three values count, so an ordinary launch
+/// never installs an update.
+#[cfg(any(windows, test))]
+fn installer_args<I, S>(args: I) -> InstallerArgs
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+    if args
+        .get(1)
+        .is_none_or(|arg| arg.as_os_str() != std::ffi::OsStr::new(UPDATE_INSTALL_ARG))
+    {
+        return InstallerArgs::Normal;
+    }
+    match args.as_slice() {
+        [_, _, setup, exe, pid] => match pid.to_str().and_then(|pid| pid.parse().ok()) {
+            Some(pid) => InstallerArgs::Install {
+                setup: PathBuf::from(setup),
+                exe: PathBuf::from(exe),
+                pid,
+            },
+            None => InstallerArgs::Invalid,
+        },
+        _ => InstallerArgs::Invalid,
+    }
+}
+
+/// A copy of this executable that installs `setup` after the app exits. The
+/// installed exe cannot be overwritten while it runs, so the helper must not be
+/// the installed image; it waits for `pid` to exit first.
+#[cfg(target_os = "windows")]
+fn install_from_setup(setup: &Path, work: &Path, exe: &Path) -> Result<Command> {
+    let helper = work.join("switch-hosts-lite-update-helper.exe");
+    let _ = fs::remove_file(&helper);
+    fs::copy(exe, &helper).localize("err_update_install")?;
+    let mut command = start_command(&helper);
+    command
+        .arg(UPDATE_INSTALL_ARG)
+        .arg(setup)
+        .arg(exe)
+        .arg(std::process::id().to_string());
+    Ok(command)
+}
+
+/// When this process is the update helper started by `install_from_setup`, wait
+/// for the app to exit, run the installer elevated, and start the app again. An
+/// ordinary launch returns immediately.
+#[cfg(target_os = "windows")]
+pub fn run_update_installer_helper() {
+    match installer_args(std::env::args_os()) {
+        InstallerArgs::Normal => {}
+        InstallerArgs::Invalid => {
+            eprintln!("update helper: expected {UPDATE_INSTALL_ARG} <setup> <exe> <pid>");
+            std::process::exit(1);
+        }
+        InstallerArgs::Install { setup, exe, pid } => {
+            wait_for_exit(pid);
+            let installed = crate::hosts::run_elevated_process(
+                &setup,
+                std::ffi::OsStr::new("/S"),
+                "err_update_install",
+            );
+            if let Err(err) = &installed {
+                eprintln!("update helper: {err:#}");
+            }
+            // The installer is a single file; its work directory holds only the
+            // running helper now, so it is removed on a later startup.
+            let _ = fs::remove_file(&setup);
+            if let Err(err) = start_command(&exe).spawn() {
+                eprintln!("update helper: restart failed: {err}");
+            }
+            std::process::exit(if installed.is_ok() { 0 } else { 1 });
+        }
+    }
+}
+
+/// Wait until `pid` exits. A process that is already gone, or that cannot be
+/// opened, is treated as exited.
+#[cfg(target_os = "windows")]
+fn wait_for_exit(pid: u32) {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+    unsafe {
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !process.is_null() {
+            WaitForSingleObject(process, INFINITE);
+            CloseHandle(process);
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -714,7 +783,7 @@ fn start_command(exe: &Path) -> Command {
     command
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn install(_: &Path, _: &Path, _: &str) -> Result<Command> {
     Err(LocalizedError::new("err_update_install").detail(std::env::consts::OS).into())
 }
@@ -725,6 +794,19 @@ fn work_dir(version: &str) -> Result<PathBuf> {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).localize("err_update_download")?;
     Ok(dir)
+}
+
+/// Remove scratch directories left by earlier updates. The Windows helper
+/// cannot delete its own copy while it runs, so its directory stays behind.
+fn remove_stale_update_dirs() {
+    let Ok(entries) = std::env::temp_dir().read_dir() else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with("switch-hosts-lite-update-") {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 // -- UI ------------------------------------------------------------------------
@@ -777,7 +859,11 @@ pub fn init(cx: &mut App) {
     cx.set_global(UpdateState::default());
     cx.spawn(async move |cx| {
         cx.background_executor().timer(STARTUP_DELAY).await;
-        cx.background_executor().spawn(async { remove_leftovers() }).await;
+        cx.background_executor().spawn(async {
+            remove_leftovers();
+            remove_stale_update_dirs();
+        })
+        .await;
         cx.update(|cx| {
             let settings = Settings::global(cx);
             if settings.check_updates && due(settings.last_update_check, now()) && is_configured() {
@@ -1034,7 +1120,11 @@ fn start_update(release: Rc<Release>, cx: &mut App) {
             .background_executor()
             .spawn(async move {
                 let relaunch = install(&archive, &work, &version);
-                let _ = fs::remove_dir_all(&work);
+                // A successful install removes its own work directory; the
+                // Windows helper needs it to hold the installer until it runs.
+                if relaunch.is_err() {
+                    let _ = fs::remove_dir_all(&work);
+                }
                 relaunch
             })
             .await;
@@ -1096,8 +1186,6 @@ mod tests {
             "windows-x86_64"
         } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
             "windows-aarch64"
-        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            "linux-x86_64"
         } else {
             return;
         };
@@ -1110,7 +1198,7 @@ mod tests {
         "pub_date": "2026-11-06T00:00:00Z",
         "assets": {
             "macos-aarch64": {"url": "https://example.com/a.zip", "sha256": "AB0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd", "size": 10},
-            "linux-x86_64": {"url": "ftp://example.com/a.tar.xz", "sha256": "ab0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd", "size": 10},
+            "freebsd-x86_64": {"url": "ftp://example.com/a.zip", "sha256": "ab0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd", "size": 10},
             "windows-x86_64": {"url": "https://example.com/a.zip", "sha256": "not-hex", "size": 10}
         }
     }"#;
@@ -1121,14 +1209,14 @@ mod tests {
         assert_eq!(manifest.version, "v0.3.0");
         let asset = select_asset(&manifest, "macos-aarch64").unwrap();
         assert_eq!((asset.url.as_str(), asset.size), ("https://example.com/a.zip", 10));
-        assert_eq!(select_asset(&manifest, "linux-x86_64"), None);
+        assert_eq!(select_asset(&manifest, "freebsd-x86_64"), None);
         assert_eq!(select_asset(&manifest, "windows-x86_64"), None);
         assert_eq!(select_asset(&manifest, "windows-aarch64"), None);
 
         let release = evaluate(parse_manifest(MANIFEST).unwrap(), "0.2.9", "macos-aarch64").unwrap();
         assert_eq!((release.version.as_str(), release.notes.as_str()), ("0.3.0", "Fixes\n- a bug"));
         assert!(release.asset.is_some());
-        assert!(evaluate(parse_manifest(MANIFEST).unwrap(), "0.2.9", "linux-aarch64").unwrap().asset.is_none());
+        assert!(evaluate(parse_manifest(MANIFEST).unwrap(), "0.2.9", "freebsd-aarch64").unwrap().asset.is_none());
         assert!(evaluate(parse_manifest(MANIFEST).unwrap(), "0.3.0", "macos-aarch64").is_none());
 
         assert!(parse_manifest(r#"{"version": "next"}"#).is_err());
@@ -1166,6 +1254,28 @@ mod tests {
         assert_eq!(parse_repo("https://github.com/a/b/tree/main"), None);
         assert_eq!(parse_repo(""), None);
         assert_eq!(repo().is_some(), !env!("CARGO_PKG_REPOSITORY").contains("/OWNER/") || option_env!("SHL_UPDATE_REPO").is_some());
+    }
+
+    #[test]
+    fn parses_update_helper_arguments() {
+        assert_eq!(installer_args(["app"]), InstallerArgs::Normal);
+        assert_eq!(installer_args(["app", "--other", "x"]), InstallerArgs::Normal);
+        let setup = r"C:\Temp\setup.exe";
+        let exe = r"C:\Program Files\App\app.exe";
+        assert_eq!(
+            installer_args(["app", UPDATE_INSTALL_ARG, setup, exe, "42"]),
+            InstallerArgs::Install { setup: PathBuf::from(setup), exe: PathBuf::from(exe), pid: 42 }
+        );
+        assert_eq!(installer_args(["app", UPDATE_INSTALL_ARG]), InstallerArgs::Invalid);
+        assert_eq!(installer_args(["app", UPDATE_INSTALL_ARG, "setup", "exe"]), InstallerArgs::Invalid);
+        assert_eq!(
+            installer_args(["app", UPDATE_INSTALL_ARG, "setup", "exe", "nope"]),
+            InstallerArgs::Invalid
+        );
+        assert_eq!(
+            installer_args(["app", UPDATE_INSTALL_ARG, "setup", "exe", "1", "extra"]),
+            InstallerArgs::Invalid
+        );
     }
 
     #[test]

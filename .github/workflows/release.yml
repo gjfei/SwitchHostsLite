@@ -158,16 +158,17 @@ jobs:
       #     $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
       #     & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target\${{ matrix.target }}\release\switch-hosts-lite.exe"
 
-      - name: Package Windows
+      - name: Build Windows installer
         if: runner.os == 'Windows'
-        shell: pwsh
         run: |
-          $out = (New-Item -ItemType Directory -Force out).FullName
-          # 7-Zip's deflate is a few percent smaller than Compress-Archive's;
-          # run from the release dir so the exe sits at the archive root.
-          Push-Location "target\${{ matrix.target }}\release"
-          7z a -tzip -mx=9 "$out\$env:NAME.zip" switch-hosts-lite.exe
-          Pop-Location
+          makensis="$(command -v makensis || true)"
+          [[ -n "$makensis" ]] || makensis="/c/Program Files (x86)/NSIS/makensis.exe"
+          mkdir -p out
+          "$makensis" -DVERSION="$VERSION" \
+            -DAPP_SRC="target/${{ matrix.target }}/release/switch-hosts-lite.exe" \
+            -DAPP_ICON="assets/icon.ico" \
+            -DOUT_FILE="out/$NAME-setup.exe" \
+            scripts/windows/installer.nsi
 
       - uses: actions/upload-artifact@v7
         with:
