@@ -49,7 +49,7 @@ The stub answers the resource-compiler probe and creates an empty output file; `
 
 ## Architecture
 
-`src/main.rs` registers the modules, installs `AppAssets` (the default gpui-kit icon bundle plus the extra Lucide icons declared with `icon_assets!(ExtraIcons, [...])`; add an icon there if `IconName::X` renders blank), and then runs `themes::load` → `app::init` → `app::bind_keys` → opens the window → `updater::init`. The app quits when the last window closes (`Quit` is bound to cmd-q, plus ctrl-q off macOS).
+`src/main.rs` registers the modules, installs `AppAssets` (the default gpui-kit icon bundle plus the extra Lucide icons declared with `icon_assets!(ExtraIcons, [...])`; add an icon there if `IconName::X` renders blank), and then runs `themes::load` → `app::init` → `app::bind_keys` → opens the window → `updater::init`. On Windows it first calls `hosts::run_as_elevated_helper`, which only returns for an ordinary launch. The app quits when the last window closes (`Quit` is bound to cmd-q, plus ctrl-q off macOS).
 
 | Module | Responsibility |
 | --- | --- |
@@ -90,9 +90,9 @@ The stub answers the resource-compiler probe and creates an empty output file; `
 - `write_raw` tries a direct write first. On `PermissionDenied` it falls back to `write_elevated`:
   - macOS: `osascript … with administrator privileges`, then a DNS cache flush.
   - Linux: `pkexec sh -c 'cat tmp > /etc/hosts'`.
-  - Windows: an elevated PowerShell (`-EncodedCommand`, UAC; exit code 1223 means cancelled) copies the file, then the result is read back and verified. Sharing violations are reported as "locked by antivirus".
+  - Windows: `ShellExecuteExW` with the `runas` verb starts this same executable with `--elevated-write-hosts <staged file>`, which shows the UAC prompt (`ERROR_CANCELLED` means it was refused). The child handles that argument at the top of `main` via `hosts::run_as_elevated_helper`, writes the staged file over the hosts, flushes DNS and exits, so no UI starts. The result is then read back and verified. Sharing violations are reported as "locked by antivirus". No PowerShell is involved: `-EncodedCommand` plus a hidden elevated `Start-Process` is what Defender's ML heuristics flag as a hosts hijacker.
 - `can_write_directly()` (open for append) gates every automatic write.
-- On Windows, `hosts_path()` comes from the registry `Tcpip\Parameters\DataBasePath` (with env expansion) if `<dir>\hosts` exists, else `GetSystemWindowsDirectoryW()\System32\drivers\etc\hosts`. It is resolved once. The pure helpers (`select_hosts_path`, `join_windows`, `ps_quote`, `encode_command`, `elevation_script`) are `cfg(any(windows, test))` so they are tested on every OS.
+- On Windows, `hosts_path()` comes from the registry `Tcpip\Parameters\DataBasePath` (with env expansion) if `<dir>\hosts` exists, else `GetSystemWindowsDirectoryW()\System32\drivers\etc\hosts`. It is resolved once. The pure helpers (`select_hosts_path`, `join_windows`, `elevated_args`) are `cfg(any(windows, test))` so they are tested on every OS.
 
 ### app.rs and app/
 
