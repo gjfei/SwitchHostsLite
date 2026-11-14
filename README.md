@@ -76,6 +76,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 
 - 解压后直接运行 `switch-hosts-lite.exe`，无需安装。
 - 程序没有代码签名，SmartScreen 可能提示「Windows 已保护你的电脑」，点击「更多信息 → 仍要运行」即可。
+- Windows Defender 偶尔会把未签名的 exe 误报为木马（检测名以 `!ml` 结尾的多为机器学习误报）。可在 [Microsoft 提交文件分析](https://www.microsoft.com/en-us/wdsi/filesubmission) 反馈，或临时把程序加入 Defender 排除项。
 - 自动更新会替换 exe 所在目录中的文件，请把它放在当前用户可写的目录（例如不要放在 `C:\Program Files` 下）。
 - 自动更新通过系统自带的 `curl.exe` 下载（Windows 10 1803 及以上版本自带）。
 
@@ -118,7 +119,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 先尝试直接写入；没有权限时：
 
 - **macOS**：通过 `osascript` 弹出管理员密码对话框，写入后刷新 DNS 缓存（`dscacheutil -flushcache`、`killall -HUP mDNSResponder`）。
-- **Windows**：通过 PowerShell 以管理员身份运行复制命令，会弹出 UAC 提示；写入后执行 `ipconfig /flushdns`，并回读文件确认内容一致（防止被杀毒软件拦截）。hosts 被其他程序占用时会给出提示。
+- **Windows**：通过 UAC 以管理员身份重新启动应用自身来写入（会弹出 UAC 提示）；写入后执行 `ipconfig /flushdns`，并回读文件确认内容一致（防止被杀毒软件拦截）。hosts 被其他程序占用时会给出提示。
 - **Linux**：通过 `pkexec` 请求授权。
 
 你也可以自行让当前用户对 hosts 文件拥有写权限，这样写入和自动应用都不会再弹出授权提示。

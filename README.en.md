@@ -76,6 +76,7 @@ Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest
 
 - Unzip and run `switch-hosts-lite.exe`; no installation needed.
 - The exe is not code-signed, so SmartScreen may say "Windows protected your PC". Click "More info → Run anyway".
+- Windows Defender occasionally flags the unsigned exe as a trojan; detection names ending in `!ml` are usually machine-learning false positives. Report it via the [Microsoft file submission](https://www.microsoft.com/en-us/wdsi/filesubmission) or temporarily add the app to Defender's exclusions.
 - Auto-update replaces the files next to the exe, so keep it in a directory the current user can write to (for example, not under `C:\Program Files`).
 - Auto-update downloads with the system `curl.exe`, which ships with Windows 10 1803 and later.
 
@@ -118,7 +119,7 @@ From left to right, the window has:
 The app first tries to write directly. Without permission:
 
 - **macOS**: an administrator password prompt is shown through `osascript`. After writing, the DNS cache is flushed (`dscacheutil -flushcache`, `killall -HUP mDNSResponder`).
-- **Windows**: the copy runs in an elevated PowerShell, which shows the UAC prompt. Afterwards `ipconfig /flushdns` runs and the file is read back to confirm its content (antivirus software may block the write). A hosts file locked by another program is reported as such.
+- **Windows**: the app relaunches itself elevated through UAC (the same binary, which only writes the staged hosts), so the UAC prompt appears. Afterwards `ipconfig /flushdns` runs and the file is read back to confirm its content (antivirus software may block the write). A hosts file locked by another program is reported as such.
 - **Linux**: authorization is requested through `pkexec`.
 
 You can also give the current user write access to the hosts file; then neither writing nor auto-apply asks for authorization.
