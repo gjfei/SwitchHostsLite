@@ -15,6 +15,30 @@
 
 SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻量版：用 Rust 和 [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component)（通过 `gpui-kit`）写成的原生桌面应用，不依赖 Electron 或 WebView。它保留了 SwitchHosts 的核心用法——把 hosts 规则分成多个方案，按需开关并写入系统 hosts——并且能导入 SwitchHosts 的备份。支持 macOS 和 Windows。
 
+## 界面预览
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/main-light.png" width="100%" alt="浅色主题"></td>
+    <td><img src="assets/screenshots/main-dark.png" width="100%" alt="深色主题"></td>
+  </tr>
+</table>
+
+<details>
+<summary>更多界面截图</summary>
+
+![信息面板](assets/screenshots/info-panel.png)
+
+![编辑方案](assets/screenshots/edit-sheet.png)
+
+![历史版本](assets/screenshots/history.png)
+
+![回收站](assets/screenshots/trash.png)
+
+![偏好设置](assets/screenshots/preferences.png)
+
+</details>
+
 ## 功能
 
 - **三种方案类型**

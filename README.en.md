@@ -15,6 +15,30 @@
 
 SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/SwitchHosts): a native desktop app written in Rust with [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component) (through `gpui-kit`), with no Electron or WebView. It keeps the core SwitchHosts workflow (split hosts rules into entries, switch them on and off, write them to the system hosts file) and can import SwitchHosts backups. It runs on macOS and Windows.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/main-light.png" width="100%" alt="Light theme"></td>
+    <td><img src="assets/screenshots/main-dark.png" width="100%" alt="Dark theme"></td>
+  </tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+![Info panel](assets/screenshots/info-panel.png)
+
+![Edit sheet](assets/screenshots/edit-sheet.png)
+
+![Version history](assets/screenshots/history.png)
+
+![Trashcan](assets/screenshots/trash.png)
+
+![Preferences](assets/screenshots/preferences.png)
+
+</details>
+
 ## Features
 
 - **Three kinds of entries**
