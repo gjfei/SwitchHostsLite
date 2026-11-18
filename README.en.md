@@ -46,10 +46,11 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
   - **Folder**: can be nested. Its choice mode is "default" (follows the top-level single/multiple setting), "single" (only one child enabled at a time) or "multiple". Turning a folder on or off turns its children on or off too.
   - **Group**: references local entries and combines their content in the chosen order.
 - **Switching applies immediately**: turning an entry on or off writes the system hosts right away. If writing fails (for example, the password prompt was cancelled), the switch reverts.
+- **Browser profiles**: without touching the system hosts, each profile turns on the hosts entries it wants in the main panel with its own switches and passes their rules to Chromium as `--host-resolver-rules`, launching Google Chrome, Microsoft Edge or Brave with a dedicated or temporary profile. You can also add the rules to your everyday browser profile (quit that browser completely first). Those switches are independent of the system hosts switches.
 - **Read-only system hosts view**: the first row of the list shows the current system hosts. If another program changed the file, it is re-read when the window regains focus.
 - **Your own entries are kept**: the app only maintains the block between `# --- SWITCHHOSTS_LITE_CONTENT_START ---` and `# --- SWITCHHOSTS_LITE_CONTENT_END ---` at the end of the hosts file. Everything outside the block stays untouched.
-- **Trashcan**: deleted entries go to the trashcan first. You can restore them to their original folder (restored entries are switched off), delete them permanently, or empty the trashcan.
-- **System hosts history**: every successful write that changes the system hosts records the content before and after it (each skipped when it equals the newest entry; up to 50). You can view a version, restore it, or delete it.
+- **Trashcan**: deleted entries go to the trashcan first. You can restore them to their original folder (restored entries are switched off), delete them permanently, or empty the trashcan; browser profiles go to the trashcan too and come back with the settings they had.
+- **History**: the clock button in the title bar opens the history sheet. Every successful system hosts write that changes the content records the content before and after it (each skipped when it equals the newest entry; up to 50). Browser profiles record every change of name, browser, launch mode, launch path, profile color, profile icon and switches. Both can be viewed, restored or deleted.
 - **Import / export**
   - Import SwitchHosts v3 / v4 / v5 backups and the backup format of earlier versions of this app. Importing replaces all current entries and moves them to the trashcan.
   - Export in the SwitchHosts v4 format (`swh_data_<time>.json`), which SwitchHosts v4 and v5 can import.
@@ -63,6 +64,7 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
 
 ## Differences from SwitchHosts
 
+- **Browser profiles are new**: SwitchHosts has no such feature. A browser profile turns the rules of the hosts entries it has switched on into launch arguments that only affect the browser process it starts, without writing the system hosts or needing administrator rights.
 - **No remote hosts**: hosts cannot be subscribed from a URL. When a SwitchHosts backup is imported, remote entries become local entries holding the content cached in the backup.
 - **No tray / menu bar icon**. Closing the window quits the app.
 - **No HTTP API, Alfred workflow or other integrations**, and no command-line interface.
@@ -108,10 +110,12 @@ Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest
 
 From left to right, the window has:
 
-1. **Icon bar**: Hosts list, history, trashcan (with a red dot when not empty), and the settings menu (Import, Export, Preferences, Theme, Allow multiple top-level items to be enabled, Check for Updates, About).
-2. **Entry list**: "System Hosts" first, then your entries. The button at the left of the title bar hides the list; while it is hidden, the current entry's switch appears in the title bar.
-3. **Editor**: shows the selected item. Only local entries are editable. System hosts, folders (showing the combined content of the entries inside that are on) and groups (showing the combined content of their entries) are read-only previews. The status bar shows the line count, byte count and whether everything is applied.
-4. **Info panel**: toggled by the button at the right of the title bar. It shows the type, rule count (lines that are neither blank nor comments), a folder's choice mode and child count, a group's entries, and the path of the system hosts.
+1. **Icon bar**: Hosts list, browser profiles, trashcan (with a red dot when not empty), and the settings menu (Import, Export, Preferences, Theme, Allow multiple top-level items to be enabled, Check for Updates, About).
+2. **List**: in the hosts view, "System Hosts" first, then your entries; in the browser profiles view, the profile list. The button at the left of the title bar hides the list; while it is hidden, the current entry's switch appears in the title bar.
+3. **Main panel**: shows the selected item. Only local entries are editable. System hosts, folders (showing the combined content of the entries inside that are on) and groups (showing the combined content of their entries) are read-only previews; in the browser profiles view this area shows the profile's hosts tree, with the same switches and interactions as the hosts list. The status bar shows the line count, byte count and whether everything is applied; for a browser profile its left side shows the mapping count and its right side only the launch state (ready, running, or the reason launching is blocked — no separate warning when there are no mappings).
+4. **Info panel**: toggled by the button at the right of the title bar. It shows the type, rule count (lines that are neither blank nor comments), a folder's choice mode and child count, a group's entries, a browser profile's settings, and the path of the system hosts.
+
+The dividers between the panels can be dragged to resize them (at least 180 each, and the main panel keeps at least 320). The width is saved on release and restored on the next launch; a narrower window shrinks the panels instead of squeezing the main panel away. The hosts view and the browser view each remember their own list width; in the browser view with the info panel open, the middle hosts tree has its own draggable width and the info panel takes the remaining width.
 
 ### Adding and editing entries
 
@@ -127,6 +131,24 @@ From left to right, the window has:
 - Click "Apply" in the title bar, or press <kbd>⌘S</kbd> (macOS) / <kbd>Ctrl+S</kbd> (Windows), to write the content of all effective entries to the system hosts.
 - What gets written: the system hosts content outside the block + a blank line + the managed block. Each entry in the block starts with `# --- <entry title> ---`; a local entry referenced several times is written only once. When nothing is enabled, the block is removed.
 - If the existing hosts file is not UTF-8 encoded, the app refuses to write it so its content is not damaged.
+
+### Browser profiles
+
+A browser profile does not write the system hosts. Each profile turns on the hosts entries it wants in the main panel with its own switches and passes their rules to Chromium as `--host-resolver-rules`, affecting only the browser process it starts, so no administrator rights are needed. The switches are saved per profile and are independent of the system hosts switches.
+
+- Click the globe icon in the icon bar to open the browser profiles view. Create a profile with **+** in the title bar (it starts as "Untitled Profile", and the info panel opens with the name selected, ready to be typed over); edit its name, browser, launch path and launch mode in the info panel.
+- Leave the launch path empty to find the browser in the usual install locations, or set the executable path of a portable or custom install by typing it or with the picker button next to the field (choosing a macOS `.app` resolves to the executable inside it).
+- Launch modes:
+  - **Own profile**: uses a dedicated profile directory in the app data folder; logins survive restarts.
+  - **Temporary session**: incognito mode with a temporary directory that is deleted when the browser exits.
+  - **Default session**: adds the launch arguments to your everyday browser profile. Quit that browser completely first, or Chromium ignores the arguments; the launch button is disabled while it is running.
+- Turn entries on in the main panel's hosts tree just like in the hosts list: a folder's switch passes down to its children, children switch brings the folder on once all of them are on, single-mode folders and the top-level "Allow multiple top-level items to be enabled" rule apply the same way, and folders collapse with the arrow on the left. The mappings come from the switched-on entries in list order, and the first mapping for a host wins.
+- Launch with the "Launch" button in the title bar or by turning on the switch on a row. The switch and the button are disabled, with the reason shown, when nothing is switched on, the browser cannot be found, the command exceeds the limit (32,000 characters on Windows, 262,144 elsewhere), or the profile's browser is still running: Chromium hands the arguments to the running instance and ignores the new rules, so quit it completely before launching again.
+- The row's switch stays in sync with the running state: it remains on (green) while the profile's browser runs and turns itself off when it exits, while the status bar shows "Running". Own-profile and temporary-session state is detected through the profile directory in the process command line (`--user-data-dir`), including instances started outside the app or by an earlier app run; a Default profile is the everyday instance — the browser process with no `--user-data-dir` — so launching another profile never makes it look open, and all three modes can be stopped from the switch, the title bar or the context menu. Everything is re-probed every 2 seconds while the browser view is open, so no window switching is needed.
+- A running profile can be stopped by turning its row switch off, with the "Stop" button in the title bar or from the context menu, which ends that profile's browser processes (a temporary session's directory is still removed). For a Default profile this quits your everyday browser itself.
+- **Profile color and launch marking**: each profile has a color (assigned round-robin from an 8-color palette at creation), changed in the info panel's color picker: the palette is offered as featured colors, and sliders or a hex value allow custom colors; the cross inside the field leaves it empty. The list row and the info panel both draw the same icon: the browser's own icon with a badge in the bottom-right corner whose background is the profile color (a neutral grey while none is set) and whose letter is the profile name's first character; the "Profile icon" row can replace it with your own picture (the picker only lists image files), which carries no badge; a small × stays in its top-right corner to restore the default icon, and hovering the icon reveals a button to replace the picture (macOS and Windows alike; Windows reads the icon straight out of the browser's exe). A color dot before the name appears only when the icon carries no badge (a custom picture). Launching an own-profile or temporary-session instance tints the browser window with that color (`--install-autogenerated-theme`) and marks the system icon: on macOS the same composite is sent over a CDP pipe (`--remote-debugging-pipe`, no network port opened) to replace the icon in the Dock and the ⌘Tab switcher; on Windows the composite is drawn from the executable's own icon resource and handed to the browser window's icon (`WM_SETICON`, best effort — Chrome may repaint over it), while the profile name and color are pre-seeded into a fresh profile directory's `Preferences`. Icons are cached under `profile-tiles/` and custom pictures under `profile-images/` in the data directory, recomposed when the color, name or browser changes. Temporary-session (incognito) windows do not support the tint, only the icon mark; a Default profile is neither tinted nor marked, so the info panel hides both the color and the icon row for it. "Mark launched browsers" in Preferences turns the whole marking off.
+- macOS recognizes and can stop instances started by an earlier app run; Windows can only list process names, so own-profile and temporary-session state is tracked only within the current app run there.
+- The context menu can copy the command, duplicate the profile (copying the switches but not the history) or move it to the trashcan. The history sheet records every change of name, browser, launch mode, launch path, profile color, profile icon and switches, and older settings can be restored.
 
 ### Permissions
 
@@ -157,9 +179,11 @@ All data lives in a `SwitchHostsLite` folder in the system configuration directo
 
 | File | Content |
 | --- | --- |
-| `data.json` | Entries, trashcan, and the "Allow multiple top-level items to be enabled" setting |
+| `data.json` | Entries, browser profiles, trashcan, and the "Allow multiple top-level items to be enabled" setting |
 | `history.json` | System hosts history |
 | `settings.json` | Language, theme, color themes, automatic update checks and other preferences |
+| `profile-tiles/` | Cached composite icons for the browser launch marking |
+| `profile-images/` | Custom profile icon pictures |
 | `themes/` | Your own theme files |
 
 Files are written to a temporary file in the same directory and then renamed, so a crash mid-write never leaves a broken file. If `data.json` or `settings.json` cannot be parsed, it is renamed to `*.json.bak` and defaults are used. Edits are saved 0.5 seconds after typing stops, and pending edits are saved on quit.
