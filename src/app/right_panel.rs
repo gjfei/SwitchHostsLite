@@ -11,14 +11,14 @@ use super::{Current, SwitchHostsApp, display_title, folder_mode_label, item_icon
 use crate::store::{self, Item, ItemKind, TrashItem};
 use crate::hosts;
 
-fn heading(icon: IconName, title: SharedString) -> impl IntoElement {
+pub(super) fn heading(icon: IconName, title: SharedString) -> impl IntoElement {
     h_flex()
         .gap_2()
         .child(Icon::new(icon).large())
         .child(div().flex_1().min_w_0().truncate().font_semibold().child(title))
 }
 
-fn field(label: impl Into<SharedString>, value: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+pub(super) fn field(label: impl Into<SharedString>, value: impl Into<SharedString>, cx: &App) -> impl IntoElement {
     h_flex()
         .gap_2()
         .justify_between()
@@ -28,12 +28,14 @@ fn field(label: impl Into<SharedString>, value: impl Into<SharedString>, cx: &Ap
 }
 
 impl SwitchHostsApp {
-    pub(super) fn render_right_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_right_panel(&self, fill: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let (border, muted) = (theme.border, theme.muted_foreground);
+        let muted = theme.muted_foreground;
         let body = match self.current() {
             Current::System => self.render_system_info(cx).into_any_element(),
             Current::Item(item) => self.render_item_info(item, cx).into_any_element(),
+            Current::Browser(profile) => self.render_profile_right(profile, cx),
+            Current::TrashProfile(trash) => self.render_trash_profile_info(trash, cx),
             Current::Trash(trash) => self.render_trash_info(trash, cx).into_any_element(),
             Current::None => v_flex()
                 .flex_1()
@@ -44,17 +46,15 @@ impl SwitchHostsApp {
                 .child(t!("nothing_selected"))
                 .into_any_element(),
         };
-        v_flex()
+        let panel = v_flex()
             .id("info-panel")
-            .w(px(240.))
             .h_full()
-            .flex_shrink_0()
             .overflow_y_scroll()
             .p_3()
             .gap_3()
-            .border_l_1()
-            .border_color(border)
-            .child(body)
+            .child(body);
+        // In the browser view the info panel is the main panel's remainder.
+        if fill { panel.flex_1().min_w_0() } else { panel.w(px(self.info_width)).flex_shrink_0() }
     }
 
     fn render_system_info(&self, cx: &mut Context<Self>) -> impl IntoElement {

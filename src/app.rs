@@ -1,4 +1,9 @@
-use std::{cell::Cell, ops::Range, time::Duration};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    ops::Range,
+    time::Duration,
+};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -11,12 +16,14 @@ use gpui_kit::*;
 
 use rust_i18n::t;
 
+use crate::browser::{self, BrowserProfile};
 use crate::i18n::error_text;
 use crate::settings::{Settings, ThemePref};
-use crate::store::{FolderMode, History, Item, ItemKind, Store, TrashItem};
-use crate::{editor_ops, highlight, hosts, store};
+use crate::store::{FolderMode, History, Item, ItemKind, Store, TrashItem, TrashedProfile};
+use crate::{editor_ops, highlight, hosts, panels, store, tile};
 
 mod backup;
+mod browser_panel;
 mod edit_sheet;
 mod history_sheet;
 mod icon_sidebar;
@@ -24,8 +31,11 @@ mod list_panel;
 mod main_panel;
 mod preferences;
 mod right_panel;
+mod splitter;
+mod tree_row;
 
 use edit_sheet::EditDraft;
+use splitter::PanelEdge;
 
 actions!(
     switch_hosts,
@@ -37,8 +47,15 @@ const EDITOR_CONTEXT: &str = "Input && mode == editor";
 const AUTO_APPLY_DELAY: Duration = Duration::from_millis(1000);
 /// Typing is written to disk once it pauses this long.
 const SAVE_DELAY: Duration = Duration::from_millis(500);
+/// How often the open browser view re-probes browser processes.
+const RUNNING_POLL: Duration = Duration::from_secs(2);
 /// Height of the window title bar, which doubles as the main toolbar.
-const TOP_BAR_HEIGHT: Pixels = px(44.);
+pub(crate) const TOP_BAR_HEIGHT: Pixels = px(44.);
+
+/// Probe which profiles have a browser open. Runs off the render path.
+fn probe_running(profiles: Vec<BrowserProfile>) -> HashSet<String> {
+    browser::running_profiles(&profiles, &store::data_dir(), &std::env::temp_dir())
+}
 
 /// Load the preferences and apply their language and theme.
 pub fn init(cx: &mut App) {
@@ -74,6 +91,8 @@ pub fn bind_keys(cx: &mut App) {
 enum Selection {
     System,
     Item(String),
+    /// The browser profile view, with the selected profile.
+    Browser(Option<String>),
     /// The trash view, with the selected trash entry.
     Trash(Option<String>),
 }
@@ -82,8 +101,26 @@ enum Selection {
 enum Current<'a> {
     System,
     Item(&'a Item),
+    Browser(&'a BrowserProfile),
     Trash(&'a TrashItem),
+    TrashProfile(&'a TrashedProfile),
     None,
+}
+
+/// Which revisions the history sheet lists.
+#[derive(Clone, PartialEq)]
+enum HistoryScope {
+    Hosts,
+    Profile(String),
+}
+
+/// One row of the unified trash list, newest first.
+pub(super) struct TrashRow {
+    pub id: String,
+    pub profile: bool,
+    pub icon: IconName,
+    pub title: String,
+    pub deleted_at: i64,
 }
 
 pub struct SwitchHostsApp {
@@ -93,9 +130,28 @@ pub struct SwitchHostsApp {
     selected: Selection,
     /// Selection to return to when leaving the trash view.
     last_list_selection: Selection,
+    /// Selection to return to when leaving the browser or trash view.
+    last_hosts_selection: Selection,
     show_list: bool,
     show_info: bool,
+    list_width: f32,
+    browser_list_width: f32,
+    tree_width: f32,
+    info_width: f32,
+    /// The divider being dragged, if any.
+    resize: Option<splitter::PanelResize>,
     history_selected: Option<String>,
+    history_scope: HistoryScope,
+    /// Profiles this app launched, by id, with the browser's pid.
+    launched: HashMap<String, u32>,
+    /// Profiles whose own browser instance is detected by process command
+    /// line, including instances started before this app process.
+    profile_procs: HashSet<String>,
+    /// Bumped when the browser view opens, so older polling loops stop.
+    running_generation: u64,
+    launching: bool,
+    stopping: bool,
+    profile_inputs: Option<browser_panel::ProfileInputs>,
     system_hosts: String,
     /// Modification stamp of the system hosts when it was last read.
     system_stamp: Option<hosts::Stamp>,
@@ -161,11 +217,16 @@ impl SwitchHostsApp {
             }),
             // Pick up changes other programs made to the system hosts.
             cx.observe_window_activation(window, |this, window, cx| {
-                if window.is_window_active() && this.reload_system_hosts(false) {
-                    if this.selected == Selection::System {
-                        this.refresh_editor(window, cx);
+                if window.is_window_active() {
+                    if this.in_browser_view() {
+                        this.refresh_running(cx);
                     }
-                    cx.notify();
+                    if this.reload_system_hosts(false) {
+                        if this.selected == Selection::System {
+                            this.refresh_editor(window, cx);
+                        }
+                        cx.notify();
+                    }
                 }
             }),
             cx.on_app_quit(|this, _| {
@@ -174,14 +235,29 @@ impl SwitchHostsApp {
             }),
         ];
 
+        let settings = Settings::global(cx);
+
         Self {
             store,
             history: None,
             selected: Selection::System,
             last_list_selection: Selection::System,
+            last_hosts_selection: Selection::System,
             show_list: true,
             show_info: false,
+            list_width: panels::initial_width(settings.list_width),
+            browser_list_width: panels::initial_width(settings.browser_list_width),
+            tree_width: panels::initial_width(settings.tree_width),
+            info_width: panels::initial_width(settings.info_width),
+            resize: None,
             history_selected: None,
+            history_scope: HistoryScope::Hosts,
+            launched: HashMap::new(),
+            profile_procs: HashSet::new(),
+            running_generation: 0,
+            launching: false,
+            stopping: false,
+            profile_inputs: None,
             system_hosts,
             system_stamp,
             editor,
@@ -233,11 +309,67 @@ impl SwitchHostsApp {
         self.store.trash.iter().find(|t| t.item.id == id)
     }
 
+    fn selected_profile(&self) -> Option<&BrowserProfile> {
+        match &self.selected {
+            Selection::Browser(Some(id)) => self.store.profile(id),
+            _ => None,
+        }
+    }
+
+    fn selected_profile_mut(&mut self) -> Option<&mut BrowserProfile> {
+        let id = match &self.selected {
+            Selection::Browser(Some(id)) => id.clone(),
+            _ => return None,
+        };
+        self.store.profile_mut(&id)
+    }
+
+    fn in_browser_view(&self) -> bool {
+        matches!(self.selected, Selection::Browser(_))
+    }
+
+    /// Both kinds of deleted entries, newest first.
+    fn trash_rows(&self) -> Vec<TrashRow> {
+        let mut rows: Vec<TrashRow> = self
+            .store
+            .trash
+            .iter()
+            .map(|t| TrashRow {
+                id: t.item.id.clone(),
+                profile: false,
+                icon: item_icon(&t.item),
+                title: t.item.title.clone(),
+                deleted_at: t.deleted_at,
+            })
+            .chain(self.store.trash_profiles.iter().map(|t| TrashRow {
+                id: t.profile.id.clone(),
+                profile: true,
+                icon: IconName::Globe,
+                title: t.profile.name.clone(),
+                deleted_at: t.deleted_at,
+            }))
+            .collect();
+        rows.sort_by_key(|row| std::cmp::Reverse(row.deleted_at));
+        rows
+    }
+
+    fn trash_first_id(&self) -> Option<String> {
+        self.trash_rows().first().map(|row| row.id.clone())
+    }
+
     fn current(&self) -> Current<'_> {
         match &self.selected {
             Selection::System => Current::System,
             Selection::Item(id) => self.store.find(id).map_or(Current::None, Current::Item),
-            Selection::Trash(Some(id)) => self.trash_item(id).map_or(Current::None, Current::Trash),
+            Selection::Browser(Some(id)) => self.store.profile(id).map_or(Current::None, Current::Browser),
+            Selection::Browser(None) => Current::None,
+            Selection::Trash(Some(id)) => match self.trash_item(id) {
+                Some(trash) => Current::Trash(trash),
+                None => self
+                    .store
+                    .trashed_profile(id)
+                    .map_or(Current::None, Current::TrashProfile),
+            },
             Selection::Trash(None) => Current::None,
         }
     }
@@ -248,7 +380,8 @@ impl SwitchHostsApp {
 
     /// Only local items are edited in the main editor.
     fn editor_readonly(&self) -> bool {
-        !matches!(self.current(), Current::Item(item) if item.kind == ItemKind::Local)
+        self.in_browser_view()
+            || !matches!(self.current(), Current::Item(item) if item.kind == ItemKind::Local)
     }
 
     fn is_applied(&self) -> bool {
@@ -269,6 +402,12 @@ impl SwitchHostsApp {
             Current::System => store::count_rules(&self.system_hosts),
             Current::Item(item) if item.kind == ItemKind::Local => store::count_rules(&item.content),
             Current::Item(item) => store::count_rules(&self.store.content_of(item, false)),
+            Current::Browser(profile) => {
+                browser::mappings(&self.store.switched_content(&profile.switches)).len()
+            }
+            Current::TrashProfile(trash) => {
+                browser::mappings(&self.store.switched_content(&trash.profile.switches)).len()
+            }
             Current::Trash(_) | Current::None => 0,
         };
         self.rules.set(Some(rules));
@@ -368,8 +507,20 @@ impl SwitchHostsApp {
         if !matches!(selection, Selection::Trash(_)) {
             self.last_list_selection = selection.clone();
         }
+        if matches!(selection, Selection::System | Selection::Item(_)) {
+            self.last_hosts_selection = selection.clone();
+        }
+        let was_browser = self.in_browser_view();
         self.selected = selection;
         self.rules.set(None);
+        if self.in_browser_view() {
+            self.refresh_profile_inputs(window, cx);
+            if !was_browser {
+                self.start_running_poll(cx);
+            }
+        } else {
+            self.profile_inputs = None;
+        }
         self.refresh_editor(window, cx);
     }
 
@@ -377,8 +528,13 @@ impl SwitchHostsApp {
     fn validate_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let selection = match &self.selected {
             Selection::Item(id) if self.store.find(id).is_none() => Selection::System,
-            Selection::Trash(Some(id)) if self.trash_item(id).is_none() => {
-                Selection::Trash(self.store.trash.first().map(|t| t.item.id.clone()))
+            Selection::Browser(Some(id)) if self.store.profile(id).is_none() => {
+                Selection::Browser(self.store.profiles.first().map(|p| p.id.clone()))
+            }
+            Selection::Trash(Some(id))
+                if self.trash_item(id).is_none() && self.store.trashed_profile(id).is_none() =>
+            {
+                Selection::Trash(self.trash_first_id())
             }
             _ => return,
         };
@@ -406,9 +562,25 @@ impl SwitchHostsApp {
             self.leave_trash_view(window, cx);
         } else {
             self.show_list = true;
-            let first = self.store.trash.first().map(|t| t.item.id.clone());
+            let first = self.trash_first_id();
             self.select(Selection::Trash(first), window, cx);
         }
+    }
+
+    fn enter_hosts_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_list = true;
+        self.select(self.last_hosts_selection.clone(), window, cx);
+        self.validate_selection(window, cx);
+    }
+
+    fn enter_browser_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_list = true;
+        if self.in_browser_view() {
+            cx.notify();
+            return;
+        }
+        let first = self.store.profiles.first().map(|p| p.id.clone());
+        self.select(Selection::Browser(first), window, cx);
     }
 
     /// The text the editor should show for the current selection.
@@ -417,6 +589,10 @@ impl SwitchHostsApp {
             Current::System => self.system_hosts.clone(),
             Current::Item(item) => self.store.content_of(item, false),
             Current::Trash(trash) => self.store.content_of(&trash.item, true),
+            // Profiles inject the hosts items they check themselves; this
+            // preview is only used outside the browser view.
+            Current::Browser(profile) => self.store.switched_content(&profile.switches),
+            Current::TrashProfile(trash) => self.store.switched_content(&trash.profile.switches),
             Current::None => String::new(),
         }
     }
@@ -528,6 +704,321 @@ impl SwitchHostsApp {
                     true
                 })
         });
+    }
+
+    // -- browser profiles ----------------------------------------------------
+
+    /// The `(host, ip)` mappings the selected profile injects.
+    fn profile_maps(&self) -> Vec<(String, String)> {
+        self.selected_profile().map_or_else(Vec::new, |profile| {
+            browser::mappings(&self.store.switched_content(&profile.switches))
+        })
+    }
+
+    fn profile_cmd(&self, cx: &App) -> String {
+        self.selected_profile().map_or_else(String::new, |p| {
+            let mark = browser::mark_color(p, Settings::global(cx).mark_launched);
+            browser::build_cmd(p, &self.profile_maps(), &store::data_dir(), &std::env::temp_dir(), mark)
+        })
+    }
+
+    fn profile_block(&self, cx: &App) -> Option<browser::Block> {
+        let profile = self.selected_profile()?;
+        let maps = self.profile_maps();
+        let mark = browser::mark_color(profile, Settings::global(cx).mark_launched);
+        let cmd = browser::build_cmd(profile, &maps, &store::data_dir(), &std::env::temp_dir(), mark);
+        let running = self.profile_running(profile);
+        browser::block_reason(profile, maps.len(), cmd.len(), running)
+    }
+
+    /// Whether the profile's browser is open, as far as this app can tell.
+    /// `Default` profiles are the everyday instance, found by process name;
+    /// independent and ephemeral ones by their own `--user-data-dir`, so
+    /// instances started outside this app or in an earlier session still count.
+    fn profile_running(&self, profile: &BrowserProfile) -> bool {
+        self.launched.contains_key(&profile.id) || self.profile_procs.contains(&profile.id)
+    }
+
+    /// Probe browser processes off the render path; results are cached.
+    fn refresh_running(&mut self, cx: &mut Context<Self>) {
+        let profiles = self.store.profiles.clone();
+        cx.spawn(async move |this, cx| {
+            let procs = cx
+                .background_executor()
+                .spawn(async move { probe_running(profiles) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.profile_procs = procs;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Keep probing while the browser view is open, so quitting a browser
+    /// outside the app shows up without switching windows first.
+    fn start_running_poll(&mut self, cx: &mut Context<Self>) {
+        self.refresh_running(cx);
+        self.running_generation += 1;
+        let generation = self.running_generation;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(RUNNING_POLL).await;
+                let Ok((active, profiles)) = this.update(cx, |this, _| {
+                    (this.in_browser_view() && this.running_generation == generation, this.store.profiles.clone())
+                }) else {
+                    break;
+                };
+                if !active {
+                    break;
+                }
+                let procs = cx
+                    .background_executor()
+                    .spawn(async move { probe_running(profiles) })
+                    .await;
+                let Ok(still_active) = this.update(cx, |this, cx| {
+                    let active = this.in_browser_view() && this.running_generation == generation;
+                    if active {
+                        this.profile_procs = procs;
+                        cx.notify();
+                    }
+                    active
+                }) else {
+                    break;
+                };
+                if !still_active {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn mutate_profile(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut BrowserProfile)) {
+        if let Some(profile) = self.selected_profile_mut() {
+            f(profile);
+        }
+        self.persist(cx);
+    }
+
+    /// The title bar's add button: a hosts item, or a profile in the browser view.
+    fn add_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_browser_view() {
+            self.add_profile(window, cx);
+        } else if !self.in_trash_view() {
+            self.open_add_sheet(window, cx);
+        }
+    }
+
+    fn add_profile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let id = self.store.add_profile(t!("profile_default_name"));
+        if let Some(profile) = self.store.profile(&id) {
+            tile::refresh(profile);
+        }
+        self.store_changed(window, cx);
+        self.select(Selection::Browser(Some(id)), window, cx);
+        // Like the list's other add flows, the new name is visible and ready to
+        // be typed over.
+        self.show_info = true;
+        self.focus_profile_name(window, cx);
+        cx.notify();
+    }
+
+    /// Launch from a list row, selecting it first.
+    fn launch_profile_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.select(Selection::Browser(Some(id)), window, cx);
+        self.launch_profile(window, cx);
+    }
+
+    fn duplicate_profile(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(copy) = self.store.duplicate_profile(&id) {
+            self.store_changed(window, cx);
+            self.select(Selection::Browser(Some(copy)), window, cx);
+        }
+    }
+
+    fn confirm_delete_profile(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.store.profile(&id) else {
+            return;
+        };
+        let title = display_title(&profile.name);
+        let view = cx.entity();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (view, id) = (view.clone(), id.clone());
+            alert
+                .confirm()
+                .title(t!("move_to_trash"))
+                .description(t!("move_to_trash_confirm", title = title))
+                .on_ok(move |_, window, cx| {
+                    let id = id.clone();
+                    view.update(cx, |this, cx| {
+                        this.store.delete_profile(&id);
+                        this.store_changed(window, cx);
+                    });
+                    true
+                })
+        });
+    }
+
+    fn launch_profile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.selected_profile().cloned() else {
+            return;
+        };
+        if self.launching || self.profile_block(cx).is_some() {
+            return;
+        }
+        self.launching = true;
+        cx.notify();
+        let maps = self.profile_maps();
+        let mark = browser::mark_color(&profile, Settings::global(cx).mark_launched);
+        // Composite on the main thread; launching only reads the cached PNG.
+        let tile = mark.and_then(|_| tile::ensure(&profile));
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    // Re-probe: the cached state may predate a quit or start.
+                    let data_dir = store::data_dir();
+                    let tmp = std::env::temp_dir();
+                    let busy = match profile.mode {
+                        browser::ProfileMode::Default => browser::default_running(profile.browser),
+                        _ => !browser::running_profiles(std::slice::from_ref(&profile), &data_dir, &tmp).is_empty(),
+                    };
+                    if busy {
+                        return Err(crate::i18n::LocalizedError::new("err_browser_running")
+                            .arg("name", profile.browser.name())
+                            .into());
+                    }
+                    #[cfg(windows)]
+                    if let (Some(color), Some(udd)) = (mark, browser::user_data_dir(&profile, &data_dir, &tmp)) {
+                        let _ = browser::seed_prefs(&profile, color, &udd);
+                    }
+                    let (child, mut pipe) = browser::spawn(&profile, &maps, &data_dir, &tmp, mark)
+                        .map_err(|err| crate::i18n::LocalizedError::new("err_launch_browser").detail(err))?;
+                    if let (Some(pipe), Some(tile)) = (pipe.as_mut(), tile.as_ref())
+                        && let Ok(png) = std::fs::read(tile)
+                    {
+                        pipe.set_tile(&png);
+                    }
+                    // Windows has no debugging pipe: the picture is handed to
+                    // the browser window's icon instead, which the taskbar
+                    // draws from. Best effort — Chrome may repaint over it.
+                    #[cfg(windows)]
+                    if let Some(tile) = tile.as_ref() {
+                        crate::windows::hand_off_window_icon(child.id(), tile);
+                    }
+                    let cleanup = (profile.mode == browser::ProfileMode::Ephemeral)
+                        .then(|| browser::ephemeral_dir(&profile, &tmp));
+                    Ok::<_, anyhow::Error>((profile, child, cleanup, pipe))
+                })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                this.launching = false;
+                match &result {
+                    Ok((profile, child, _, _)) => {
+                        window.push_notification(
+                            Notification::success(t!(
+                                "launched",
+                                name = profile.browser.name(),
+                                profile = profile.name
+                            )),
+                            cx,
+                        );
+                        this.launched.insert(profile.id.clone(), child.id());
+                        this.refresh_running(cx);
+                    }
+                    Err(err) => Self::notify_error(window, error_text(err), cx),
+                }
+                cx.notify();
+            })
+            .ok();
+            // Wait for the browser itself, so the running mark clears on exit
+            // and an ephemeral profile's directory is removed afterwards.
+            if let Ok((profile, mut child, cleanup, pipe)) = result {
+                let id = profile.id;
+                cx.background_executor()
+                    .spawn(async move {
+                        // Chrome quits when the debugging pipe reaches EOF.
+                        let _pipe = pipe;
+                        let _ = child.wait();
+                        if let Some(dir) = cleanup {
+                            let _ = std::fs::remove_dir_all(dir);
+                        }
+                    })
+                    .await;
+                this.update_in(cx, |this, _, cx| {
+                    this.launched.remove(&id);
+                    this.refresh_running(cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Whether the profile's browser is running, so it can be stopped here; for
+    /// `Default` that is the everyday instance.
+    fn profile_stoppable(&self, profile: &BrowserProfile) -> bool {
+        self.profile_running(profile)
+    }
+
+    fn stop_profile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.selected_profile() else {
+            return;
+        };
+        let id = profile.id.clone();
+        self.stop_profile_by_id(id, window, cx);
+    }
+
+    fn stop_profile_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.store.profile(&id).cloned() else {
+            return;
+        };
+        let pid = self.launched.get(&id).copied();
+        if self.stopping {
+            return;
+        }
+        self.stopping = true;
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let name = profile.browser.name();
+            let stopped = cx
+                .background_executor()
+                .spawn(async move {
+                    browser::stop(&profile, &store::data_dir(), &std::env::temp_dir(), pid)
+                })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                this.stopping = false;
+                if stopped {
+                    window.push_notification(
+                        Notification::success(t!("browser_stopped", name = name)),
+                        cx,
+                    );
+                    this.refresh_running(cx);
+                } else {
+                    Self::notify_error(window, t!("err_stop_browser", name = name), cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn copy_command(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cmd = self.profile_cmd(cx);
+        if cmd.is_empty() {
+            return;
+        }
+        if cmd.len() > browser::cmd_limit() {
+            window.push_notification(Notification::error(t!("cmd_copy_blocked")), cx);
+            return;
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(cmd));
+        window.push_notification(Notification::success(t!("cmd_copied")), cx);
     }
 
     // -- applying ------------------------------------------------------------
@@ -700,8 +1191,39 @@ impl Render for SwitchHostsApp {
         if window.focused(cx).is_none() {
             self.focus_handle.focus(window, cx);
         }
+        let total = f32::from(window.bounds().size.width);
+        let browser = self.in_browser_view();
+        if browser {
+            // With the info panel open the tree keeps its own width and the
+            // info panel takes the rest; closed, the tree fills like an editor.
+            let (list, tree) = panels::fit_widths(
+                total,
+                self.show_list.then_some(self.browser_list_width),
+                self.show_info.then_some(self.tree_width),
+            );
+            if let Some(width) = list {
+                self.browser_list_width = width;
+            }
+            if let Some(width) = tree {
+                self.tree_width = width;
+            }
+        } else {
+            let (list, info) = panels::fit_widths(
+                total,
+                self.show_list.then_some(self.list_width),
+                self.show_info.then_some(self.info_width),
+            );
+            if let Some(width) = list {
+                self.list_width = width;
+            }
+            if let Some(width) = info {
+                self.info_width = width;
+            }
+        }
         let list_panel = self.show_list.then(|| self.render_list_panel(cx).into_any_element());
-        let right_panel = self.show_info.then(|| self.render_right_panel(cx).into_any_element());
+        let list_divider = self.show_list.then(|| self.render_panel_divider(PanelEdge::List, cx));
+        let info_divider = (self.show_info && !browser).then(|| self.render_panel_divider(PanelEdge::Info, cx));
+        let right_panel = (self.show_info && !browser).then(|| self.render_right_panel(false, cx).into_any_element());
         v_flex()
             .track_focus(&self.focus_handle)
             .key_context("SwitchHostsApp")
@@ -724,6 +1246,8 @@ impl Render for SwitchHostsApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .on_mouse_move(cx.listener(Self::resize_panels))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| this.finish_resize(cx)))
             .child(self.render_top_bar(cx))
             .child(
                 div()
@@ -733,7 +1257,9 @@ impl Render for SwitchHostsApp {
                     .min_h_0()
                     .child(self.render_icon_sidebar(cx))
                     .children(list_panel)
+                    .children(list_divider)
                     .child(self.render_main_panel(cx))
+                    .children(info_divider)
                     .children(right_panel),
             )
     }

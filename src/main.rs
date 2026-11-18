@@ -25,6 +25,8 @@ mod windows;
 use std::borrow::Cow;
 
 use gpui_kit::assets::{Assets, icon_assets};
+#[cfg(target_os = "macos")]
+use gpui_kit::component::TITLE_BAR_HEIGHT;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
@@ -32,8 +34,13 @@ actions!(switch_hosts, [Quit]);
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-// Icons used by the app that are not in the default component bundle.
-icon_assets!(ExtraIcons, [Clock, Layers, List, Lock, Monitor, Pencil, RotateCcw, Save, Trash]);
+// Icons used by the app that are not in the default component bundle. The
+// default bundle is a 106-icon subset, and `Icon` draws nothing for a path the
+// asset source does not serve, so every icon the app names must appear here
+// (or already be in that subset, like the `Close` cross used for clearing).
+icon_assets!(ExtraIcons, [
+    Clock, Copy, Globe, Layers, List, Lock, Monitor, Pencil, PencilLine, Play, RotateCcw, Save, Square, Trash
+]);
 
 // The bundle icons (icns/ico) are not assets gpui can load; the About dialog
 // shows this copy.
@@ -88,6 +95,7 @@ fn main() {
             #[cfg(all(target_os = "macos", debug_assertions))]
             macos::set_dock_icon();
             app::bind_keys(cx);
+            browser::clean_stale(&std::env::temp_dir());
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             #[cfg(not(target_os = "macos"))]
             cx.bind_keys([KeyBinding::new("ctrl-q", Quit, None)]);
@@ -100,13 +108,23 @@ fn main() {
             .detach();
 
             let bounds = Bounds::centered(None, size(px(1000.), px(680.)), cx);
+            let titlebar = TitlebarOptions {
+                title: Some("SwitchHosts Lite".into()),
+                // The kit's default offset centres the traffic lights in its
+                // own `TITLE_BAR_HEIGHT` bar. This window renders a taller top
+                // bar, so push the lights down by half the difference to keep
+                // them on the bar's centre line instead of hugging its top.
+                #[cfg(target_os = "macos")]
+                traffic_light_position: Some(point(
+                    px(9.),
+                    px(9.) + (app::TOP_BAR_HEIGHT - TITLE_BAR_HEIGHT) * 0.5,
+                )),
+                ..TitleBar::title_bar_options()
+            };
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(720.), px(480.))),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("SwitchHosts Lite".into()),
-                    ..TitleBar::title_bar_options()
-                }),
+                titlebar: Some(titlebar),
                 ..TitleBar::window_options()
             };
             gpui_kit::open_window(options, cx, |window, cx| {

@@ -7,14 +7,14 @@ use gpui_kit::component::{
     h_flex,
     menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
     notification::Notification,
-    switch::Switch,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::{Selection, SwitchHostsApp, display_title, item_icon};
+use super::tree_row::{self, RowState, list_row, no_drag};
+use super::{Selection, SwitchHostsApp, TrashRow, display_title, item_icon};
 use crate::store::{self, DropPosition, Item, ItemKind};
 
 /// How long a drag has to rest on a collapsed folder before it opens.
@@ -58,44 +58,6 @@ pub(super) struct DragState {
     hover_generation: u64,
 }
 
-/// Keeps pressing a control from starting a drag of its row.
-fn no_drag(control: impl IntoElement) -> Div {
-    div()
-        .flex_shrink_0()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(control)
-}
-
-/// A selectable list row: 32px high with a primary indicator bar when active.
-fn list_row(id: ElementId, active: bool, depth: usize, cx: &App) -> Stateful<Div> {
-    let theme = cx.theme();
-    let (active_bg, hover_bg, primary) = (theme.list_active, theme.list_hover, theme.primary);
-    h_flex()
-        .id(id)
-        .relative()
-        .flex_shrink_0()
-        .h(px(32.))
-        .mx(px(6.))
-        .pl(px(8. + depth as f32 * 14.))
-        .pr_1()
-        .gap_1p5()
-        .rounded(px(4.))
-        .cursor_pointer()
-        .when(active, |this| {
-            this.bg(active_bg).child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top(px(6.))
-                    .bottom(px(6.))
-                    .w(px(3.))
-                    .rounded(px(2.))
-                    .bg(primary),
-            )
-        })
-        .when(!active, |this| this.hover(|s| s.bg(hover_bg)))
-}
-
 fn menu_entry(
     view: &Entity<SwitchHostsApp>,
     label: impl Into<SharedString>,
@@ -108,19 +70,20 @@ fn menu_entry(
 impl SwitchHostsApp {
     pub(super) fn render_list_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let (sidebar, border) = (theme.sidebar, theme.sidebar_border);
+        let sidebar = theme.sidebar;
         let body = if self.in_trash_view() {
             self.render_trash_list(cx).into_any_element()
+        } else if self.in_browser_view() {
+            self.render_profile_list(cx)
         } else {
             self.render_hosts_list(cx).into_any_element()
         };
+        let width = if self.in_browser_view() { self.browser_list_width } else { self.list_width };
         v_flex()
-            .w(px(240.))
+            .w(px(width))
             .h_full()
             .flex_shrink_0()
             .bg(sidebar)
-            .border_r_1()
-            .border_color(border)
             .child(body)
     }
 
@@ -256,36 +219,11 @@ impl SwitchHostsApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme();
-        let (muted, primary, drop_target) = (theme.muted_foreground, theme.primary, theme.drop_target);
+        let (primary, drop_target) = (theme.primary, theme.drop_target);
         let id = item.id.clone();
         let active = self.selected_id() == Some(id.as_str());
         let group: SharedString = format!("row-{id}").into();
         let is_folder = item.kind == ItemKind::Folder;
-
-        let chevron = div()
-            .id(ElementId::Name(format!("chevron-{id}").into()))
-            .size_4()
-            .flex_shrink_0()
-            .when(is_folder, |this| {
-                let id = id.clone();
-                let icon = if item.collapsed {
-                    IconName::ChevronRight
-                } else {
-                    IconName::ChevronDown
-                };
-                this.child(Icon::new(icon).xsmall().text_color(muted))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.toggle_collapsed(&id, cx);
-                    }))
-            });
-
-        let chevron = div()
-            .flex_shrink_0()
-            .when(is_folder, |this| {
-                this.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            })
-            .child(chevron);
 
         let edit_id = id.clone();
         let edit_button = no_drag(
@@ -304,17 +242,6 @@ impl SwitchHostsApp {
         .invisible()
         .group_hover(group.clone(), |s| s.visible());
 
-        let toggle_id = id.clone();
-        let switch = Switch::new(ElementId::Name(format!("switch-{id}").into()))
-            .small()
-            .checked(item.on)
-            .disabled(self.applying)
-            .on_change(cx.listener(move |this, on: &bool, window, cx| {
-                // Keep the row from also selecting or opening the item.
-                cx.stop_propagation();
-                this.toggle(toggle_id.clone(), *on, window, cx)
-            }));
-
         let indicator = drop.filter(|p| *p != DropPosition::Inside).map(|position| {
             let line = div()
                 .absolute()
@@ -330,26 +257,36 @@ impl SwitchHostsApp {
             }
         });
 
+        let collapse_id = id.clone();
+        let toggle_id = id.clone();
         let click_id = id.clone();
         let (drag_view, drag_icon, drag_title) = (cx.entity(), item_icon(item), display_title(&item.title));
         let move_id = id.clone();
-        list_row(ElementId::Name(format!("item-{id}").into()), active, depth, cx)
+        tree_row::item_row(
+            item,
+            depth,
+            RowState {
+                open: !item.collapsed,
+                active,
+                checked: item.on,
+                switch_disabled: self.applying,
+            },
+            Some(edit_button.into_any_element()),
+            cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.toggle_collapsed(&collapse_id, cx);
+            }),
+            cx.listener(move |this, on: &bool, window, cx| {
+                // Keep the row from also selecting or opening the item.
+                cx.stop_propagation();
+                this.toggle(toggle_id.clone(), *on, window, cx)
+            }),
+            cx,
+        )
             .group(group)
             .when(dimmed, |this| this.opacity(0.5))
             .when(drop == Some(DropPosition::Inside), |this| this.bg(drop_target))
             .children(indicator)
-            .child(chevron)
-            .child(Icon::new(item_icon(item)).small().text_color(muted))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .child(display_title(&item.title)),
-            )
-            .child(edit_button)
-            .child(no_drag(switch))
             .on_drag(DraggedItem(id.clone()), move |dragged, _, _, cx| {
                 drag_view.update(cx, |this, _| {
                     let hover_generation = this.drag.as_ref().map_or(0, |d| d.hover_generation);
@@ -426,9 +363,14 @@ impl SwitchHostsApp {
 
     /// Restoring can change the enabled content through a group including it.
     pub(super) fn restore_trash(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.mutate(window, cx, |store| {
-            store.restore(&id);
-        });
+        if let Some(profile_id) = self.store.restore_profile(&id) {
+            self.store_changed(window, cx);
+            self.select(Selection::Browser(Some(profile_id)), window, cx);
+        } else {
+            self.mutate(window, cx, |store| {
+                store.restore(&id);
+            });
+        }
         window.push_notification(Notification::success(t!("restored")), cx);
     }
 
@@ -447,8 +389,14 @@ impl SwitchHostsApp {
                 .on_ok(move |_, window, cx| {
                     view.update(cx, |this, cx| {
                         match &id {
-                            Some(id) => this.store.purge(id),
-                            None => this.store.trash.clear(),
+                            Some(id) => {
+                                this.store.purge(id);
+                                this.store.purge_profile(id);
+                            }
+                            None => {
+                                this.store.trash.clear();
+                                this.store.trash_profiles.clear();
+                            }
                         }
                         this.store_changed(window, cx);
                     });
@@ -460,6 +408,7 @@ impl SwitchHostsApp {
     fn render_trash_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let (muted, border) = (theme.muted_foreground, theme.sidebar_border);
+        let rows = self.trash_rows();
         let header = h_flex()
             .h(px(36.))
             .flex_shrink_0()
@@ -475,12 +424,12 @@ impl SwitchHostsApp {
                     .xsmall()
                     .icon(IconName::Trash)
                     .tooltip(t!("trash_clear"))
-                    .disabled(self.store.trash.is_empty())
-                    .when(!self.store.trash.is_empty(), |this| this.cursor_pointer())
+                    .disabled(rows.is_empty())
+                    .when(!rows.is_empty(), |this| this.cursor_pointer())
                     .on_click(cx.listener(|this, _, window, cx| this.purge_trash(None, window, cx))),
             );
 
-        if self.store.trash.is_empty() {
+        if rows.is_empty() {
             return v_flex()
                 .size_full()
                 .child(header)
@@ -497,25 +446,30 @@ impl SwitchHostsApp {
         }
 
         let view = cx.entity();
-        let rows = self.store.trash.iter().map(|trash| {
-            let item = &trash.item;
-            let id = item.id.clone();
+        let rows = rows.into_iter().map(|row| {
+            let TrashRow { id, profile, icon, title, deleted_at } = row;
             let active = self.selected == Selection::Trash(Some(id.clone()));
             let select_id = id.clone();
             let view = view.clone();
+            let kind = if profile {
+                SharedString::from(t!("browser_profiles"))
+            } else {
+                SharedString::from(t!("hosts_entry"))
+            };
             list_row(ElementId::Name(format!("trash-{id}").into()), active, 0, cx)
                 .h(px(44.))
-                .child(Icon::new(item_icon(item)).small().text_color(muted))
+                .child(Icon::new(icon).small().text_color(muted))
                 .child(
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .child(div().text_sm().truncate().child(display_title(&item.title)))
+                        .child(div().text_sm().truncate().child(display_title(&title)))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(muted)
-                                .child(store::format_time(trash.deleted_at)),
+                                .truncate()
+                                .child(format!("{kind} · {}", store::format_time(deleted_at))),
                         ),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {

@@ -27,11 +27,12 @@ impl SwitchHostsApp {
         let theme = cx.theme();
         let (sidebar, border, danger) = (theme.sidebar, theme.sidebar_border, theme.danger);
         let in_trash = self.in_trash_view();
+        let in_browser = self.in_browser_view();
 
         let trash = nav_button("nav-trash", IconName::Trash, t!("trashcan"))
             .selected(in_trash)
             .on_click(cx.listener(|this, _, window, cx| this.toggle_trash_view(window, cx)));
-        let trash = if self.store.trash.is_empty() {
+        let trash = if self.trash_rows().is_empty() {
             trash.into_any_element()
         } else {
             Badge::new().dot().color(danger).child(trash).into_any_element()
@@ -49,12 +50,19 @@ impl SwitchHostsApp {
             .border_color(border)
             .child(
                 nav_button("nav-list", IconName::List, t!("hosts_list"))
-                    .selected(self.show_list && !in_trash)
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_list_view(window, cx))),
+                    .selected(self.show_list && !in_trash && !in_browser)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.in_browser_view() || this.in_trash_view() {
+                            this.enter_hosts_view(window, cx);
+                        } else {
+                            this.toggle_list_view(window, cx);
+                        }
+                    })),
             )
             .child(
-                nav_button("nav-history", IconName::Clock, t!("show_history"))
-                    .on_click(cx.listener(|this, _, window, cx| this.open_history(window, cx))),
+                nav_button("nav-browser", IconName::Globe, t!("browser_profiles"))
+                    .selected(in_browser)
+                    .on_click(cx.listener(|this, _, window, cx| this.enter_browser_view(window, cx))),
             )
             .child(div().flex_1())
             .child(trash)

@@ -12,16 +12,30 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::{SwitchHostsApp, sheet_footer, sheet_width};
+use super::browser_panel::{profile_rev_text, rev_kind_label};
+use super::{HistoryScope, Selection, SwitchHostsApp, display_title, sheet_footer, sheet_width};
+use crate::browser::{self, RevKind};
 use crate::i18n::error_text;
 use crate::store::{self, History, HistoryEntry};
 use crate::hosts;
 
+/// One entry of the sheet's list, from either the hosts history or the
+/// selected profile's revisions.
+struct HistoryRow {
+    id: String,
+    created_at: i64,
+    meta: SharedString,
+    text: String,
+}
+
 impl SwitchHostsApp {
     pub(super) fn open_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let history = History::load();
-        self.history_selected = history.entries.first().map(|e| e.id.clone());
-        self.history = Some(history);
+        self.history_scope = match &self.selected {
+            Selection::Browser(Some(id)) => HistoryScope::Profile(id.clone()),
+            _ => HistoryScope::Hosts,
+        };
+        self.history = matches!(self.history_scope, HistoryScope::Hosts).then(History::load);
+        self.history_selected = self.history_rows(false).first().map(|row| row.id.clone());
         self.history_editor = Some(Self::new_editor(String::new(), window, cx));
         self.refresh_history_editor(window, cx);
         let view = cx.entity();
@@ -41,16 +55,60 @@ impl SwitchHostsApp {
         self.history.as_ref().map_or(&[], |h| &h.entries)
     }
 
-    fn selected_history_entry(&self) -> Option<&HistoryEntry> {
+    /// `with_text` is off while rendering: hosts entries can be large, and the
+    /// editor only needs the selected one.
+    fn history_rows(&self, with_text: bool) -> Vec<HistoryRow> {
+        match &self.history_scope {
+            HistoryScope::Hosts => self
+                .history_entries()
+                .iter()
+                .map(|entry| HistoryRow {
+                    id: entry.id.clone(),
+                    created_at: entry.created_at,
+                    meta: t!(
+                        "history_entry_size",
+                        lines = entry.line_count(),
+                        bytes = entry.content.len()
+                    )
+                    .into(),
+                    text: if with_text { entry.content.clone() } else { String::new() },
+                })
+                .collect(),
+            HistoryScope::Profile(id) => {
+                let Some(profile) = self.store.profile(id) else {
+                    return Vec::new();
+                };
+                profile
+                    .revs
+                    .iter()
+                    .map(|rev| {
+                        HistoryRow {
+                            id: rev.id.clone(),
+                            created_at: rev.created_at,
+                            meta: rev_kind_label(rev.kind),
+                            text: if with_text {
+                                let mappings = browser::mappings(
+                                    &self.store.switched_content(&rev.snapshot.switches),
+                                )
+                                .len();
+                                profile_rev_text(&rev.snapshot, mappings)
+                            } else {
+                                String::new()
+                            },
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    fn selected_history_row(&self) -> Option<HistoryRow> {
         let id = self.history_selected.as_ref()?;
-        self.history_entries().iter().find(|e| &e.id == id)
+        self.history_rows(true).into_iter().find(|row| &row.id == id)
     }
 
     fn refresh_history_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let content = self
-            .selected_history_entry()
-            .map(|e| e.content.clone())
-            .unwrap_or_default();
+        let content = self.selected_history_row().map(|row| row.text).unwrap_or_default();
         if let Some(editor) = &self.history_editor {
             editor.update(cx, |state, cx| state.set_value(content, window, cx));
         }
@@ -63,11 +121,15 @@ impl SwitchHostsApp {
     }
 
     fn restore_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry) = self.selected_history_entry() else {
+        let Some(row) = self.selected_history_row() else {
             return;
         };
-        let content = entry.content.clone();
-        let time = store::format_time(entry.created_at);
+        if let HistoryScope::Profile(profile_id) = self.history_scope.clone() {
+            self.restore_profile_rev(&profile_id, &row.id, window, cx);
+            return;
+        }
+        let content = row.text;
+        let time = store::format_time(row.created_at);
         let view = cx.entity();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (view, content) = (view.clone(), content.clone());
@@ -81,6 +143,33 @@ impl SwitchHostsApp {
                     true
                 })
         });
+    }
+
+    /// Restore an older settings snapshot as the current state of the profile,
+    /// first recording the state being replaced so the restore is undoable.
+    fn restore_profile_rev(
+        &mut self,
+        profile_id: &str,
+        rev_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self.store.profile_mut(profile_id) else {
+            return;
+        };
+        let Some(rev) = profile.revs.iter().find(|rev| rev.id == rev_id) else {
+            return;
+        };
+        let snapshot = rev.snapshot.clone();
+        profile.push_rev(RevKind::Restore);
+        profile.apply_snapshot(&snapshot);
+        crate::tile::refresh(profile);
+        crate::tile::invalidate_preview(profile_id, cx);
+        self.persist(cx);
+        self.refresh_profile_inputs(window, cx);
+        self.history_selected = self.history_rows(false).first().map(|row| row.id.clone());
+        self.refresh_history_editor(window, cx);
+        window.push_notification(Notification::success(t!("profile_restored")), cx);
     }
 
     fn write_history(&mut self, content: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -117,12 +206,24 @@ impl SwitchHostsApp {
     }
 
     fn delete_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(id), Some(history)) = (self.history_selected.take(), &mut self.history) else {
+        let Some(id) = self.history_selected.take() else {
             return;
         };
-        history.remove(&id);
-        history.save().ok();
-        self.history_selected = history.entries.first().map(|e| e.id.clone());
+        match self.history_scope.clone() {
+            HistoryScope::Hosts => {
+                if let Some(history) = &mut self.history {
+                    history.remove(&id);
+                    history.save().ok();
+                }
+            }
+            HistoryScope::Profile(profile_id) => {
+                if let Some(profile) = self.store.profile_mut(&profile_id) {
+                    profile.revs.retain(|rev| rev.id != id);
+                }
+                self.persist(cx);
+            }
+        }
+        self.history_selected = self.history_rows(false).first().map(|row| row.id.clone());
         self.refresh_history_editor(window, cx);
     }
 
@@ -136,9 +237,19 @@ impl SwitchHostsApp {
                 .description(t!("history_clear_confirm"))
                 .on_ok(move |_, window, cx| {
                     view.update(cx, |this, cx| {
-                        if let Some(history) = &mut this.history {
-                            history.entries.clear();
-                            history.save().ok();
+                        match this.history_scope.clone() {
+                            HistoryScope::Hosts => {
+                                if let Some(history) = &mut this.history {
+                                    history.entries.clear();
+                                    history.save().ok();
+                                }
+                            }
+                            HistoryScope::Profile(profile_id) => {
+                                if let Some(profile) = this.store.profile_mut(&profile_id) {
+                                    profile.revs.clear();
+                                }
+                                this.persist(cx);
+                            }
                         }
                         this.history_selected = None;
                         this.refresh_history_editor(window, cx);
@@ -154,11 +265,12 @@ impl SwitchHostsApp {
         let (muted, border, danger) = (theme.muted_foreground, theme.border, theme.danger);
         let (active_bg, hover_bg) = (theme.list_active, theme.list_hover);
         let has_selection = this.history_selected.is_some();
-        let (history, Some(history_editor)) = (this.history_entries(), &this.history_editor) else {
+        let rows = this.history_rows(false);
+        let Some(history_editor) = &this.history_editor else {
             return sheet;
         };
 
-        let body = if history.is_empty() {
+        let body = if rows.is_empty() {
             v_flex()
                 .size_full()
                 .min_h(px(240.))
@@ -168,9 +280,9 @@ impl SwitchHostsApp {
                 .child(t!("no_record"))
                 .into_any_element()
         } else {
-            let entries = history.iter().map(|entry| {
-                let id = entry.id.clone();
-                let active = this.history_selected.as_ref() == Some(&entry.id);
+            let entries = rows.iter().map(|row| {
+                let id = row.id.clone();
+                let active = this.history_selected.as_ref() == Some(&row.id);
                 let view = view.clone();
                 v_flex()
                     .id(ElementId::Name(format!("history-{id}").into()))
@@ -181,12 +293,8 @@ impl SwitchHostsApp {
                     .cursor_pointer()
                     .when(active, |this| this.bg(active_bg))
                     .when(!active, |this| this.hover(|s| s.bg(hover_bg)))
-                    .child(div().text_sm().child(store::format_time(entry.created_at)))
-                    .child(div().text_xs().text_color(muted).child(t!(
-                        "history_entry_size",
-                        lines = entry.line_count(),
-                        bytes = entry.content.len()
-                    )))
+                    .child(div().text_sm().child(store::format_time(row.created_at)))
+                    .child(div().text_xs().text_color(muted).child(row.meta.clone()))
                     .on_click(move |_, window, cx| {
                         let id = id.clone();
                         view.update(cx, |this, cx| this.select_history(id, window, cx))
@@ -236,8 +344,8 @@ impl SwitchHostsApp {
                     .text_color(danger)
                     .icon(IconName::Trash)
                     .label(t!("clear_history"))
-                    .disabled(history.is_empty())
-                    .when(!history.is_empty(), |this| this.cursor_pointer())
+                    .disabled(rows.is_empty())
+                    .when(!rows.is_empty(), |this| this.cursor_pointer())
                     .on_click(action(Self::clear_history)),
             )
             .child(
@@ -272,8 +380,18 @@ impl SwitchHostsApp {
             );
 
         let close_view = view.clone();
+        let title = match &this.history_scope {
+            HistoryScope::Hosts => SharedString::from(t!("system_hosts_history")),
+            HistoryScope::Profile(id) => {
+                let name = this
+                    .store
+                    .profile(id)
+                    .map_or_else(|| SharedString::from(t!("profile_default_name")), |p| display_title(&p.name));
+                t!("profile_history", name = name).into()
+            }
+        };
         sheet
-            .title(t!("system_hosts_history"))
+            .title(title)
             .size(sheet_width(px(720.), window))
             .child(body)
             .footer(footer)
