@@ -1,17 +1,26 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod browser;
+mod dock;
 mod editor_ops;
 mod highlight;
 mod hosts;
 mod i18n;
 #[cfg(target_os = "macos")]
 mod macos;
+mod panels;
+mod platform;
 mod settings;
 mod store;
 mod switchhosts;
 mod themes;
+mod tile;
 mod updater;
+#[cfg(windows)]
+mod winicon;
+#[cfg(windows)]
+mod windows;
 
 use std::borrow::Cow;
 

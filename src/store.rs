@@ -101,12 +101,22 @@ pub struct TrashItem {
     pub deleted_at: i64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TrashedProfile {
+    pub profile: crate::browser::BrowserProfile,
+    pub deleted_at: i64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Store {
     #[serde(default)]
     pub items: Vec<Item>,
     #[serde(default)]
     pub trash: Vec<TrashItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<crate::browser::BrowserProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trash_profiles: Vec<TrashedProfile>,
     /// Whether multiple top-level items may be enabled at the same time.
     #[serde(default = "default_true")]
     pub multi_select: bool,
@@ -159,6 +169,8 @@ impl Store {
         Self {
             items: Vec::new(),
             trash: Vec::new(),
+            profiles: Vec::new(),
+            trash_profiles: Vec::new(),
             multi_select: true,
         }
     }
@@ -305,6 +317,74 @@ impl Store {
         self.trash.retain(|t| t.item.id != id);
     }
 
+    // -- browser profiles ----------------------------------------------------
+
+    pub fn profile(&self, id: &str) -> Option<&crate::browser::BrowserProfile> {
+        self.profiles.iter().find(|p| p.id == id)
+    }
+
+    pub fn profile_mut(&mut self, id: &str) -> Option<&mut crate::browser::BrowserProfile> {
+        self.profiles.iter_mut().find(|p| p.id == id)
+    }
+
+    pub fn trashed_profile(&self, id: &str) -> Option<&TrashedProfile> {
+        self.trash_profiles.iter().find(|t| t.profile.id == id)
+    }
+
+    pub fn add_profile(&mut self, name: impl Into<String>) -> String {
+        let mut profile = crate::browser::BrowserProfile::new(name);
+        profile.tile_color =
+            Some(crate::browser::TILE_PALETTE[self.profiles.len() % crate::browser::TILE_PALETTE.len()]);
+        let id = profile.id.clone();
+        self.profiles.push(profile);
+        id
+    }
+
+    pub fn duplicate_profile(&mut self, id: &str) -> Option<String> {
+        let ix = self.profiles.iter().position(|p| p.id == id)?;
+        let mut copy = self.profiles[ix].clone();
+        copy.id = new_id();
+        copy.revs.clear();
+        let new_id = copy.id.clone();
+        if copy.custom_image
+            && std::fs::copy(crate::tile::image_path(id), crate::tile::image_path(&new_id)).is_err()
+        {
+            copy.custom_image = false;
+        }
+        self.profiles.insert(ix + 1, copy);
+        Some(new_id)
+    }
+
+    pub fn delete_profile(&mut self, id: &str) {
+        let Some(ix) = self.profiles.iter().position(|p| p.id == id) else {
+            return;
+        };
+        let profile = self.profiles.remove(ix);
+        self.trash_profiles.insert(
+            0,
+            TrashedProfile {
+                profile,
+                deleted_at: chrono::Local::now().timestamp(),
+            },
+        );
+    }
+
+    /// Restore the profile as it was deleted; profiles only read the enabled
+    /// hosts rules, so there is no switch to reset.
+    pub fn restore_profile(&mut self, id: &str) -> Option<String> {
+        let ix = self.trash_profiles.iter().position(|t| t.profile.id == id)?;
+        let profile = self.trash_profiles.remove(ix).profile;
+        let id = profile.id.clone();
+        self.profiles.push(profile);
+        Some(id)
+    }
+
+    pub fn purge_profile(&mut self, id: &str) {
+        self.trash_profiles.retain(|t| t.profile.id != id);
+        crate::tile::remove(id);
+        crate::tile::remove_image(id);
+    }
+
     /// Whether enabling a child of `folder` disables its siblings.
     pub fn single_choice(&self, folder: &Item) -> bool {
         match folder.folder_mode {
@@ -411,23 +491,28 @@ impl Store {
     /// Sections contributed by `items`, recursing into folders and groups.
     /// With `only_on`, items that are switched off are skipped.
     fn collect(&self, items: &[Item], only_on: bool) -> String {
+        self.collect_with(items, |item| item.on || !only_on)
+    }
+
+    /// Sections contributed by `items` whose switch `on` reports as on; a
+    /// switched-on group adds the local items it includes.
+    fn collect_with(&self, items: &[Item], on: impl Fn(&Item) -> bool) -> String {
         fn walk<'a>(
             store: &'a Store,
             items: &'a [Item],
-            only_on: bool,
+            on: &dyn Fn(&Item) -> bool,
             seen: &mut HashSet<&'a str>,
             out: &mut Vec<String>,
         ) {
             for item in items {
-                let on = item.on || !only_on;
                 match item.kind {
                     ItemKind::Local => {
-                        if on && seen.insert(&item.id) {
+                        if on(item) && seen.insert(&item.id) {
                             out.push(section(item));
                         }
                     }
-                    ItemKind::Folder => walk(store, &item.children, only_on, seen, out),
-                    ItemKind::Group if on => {
+                    ItemKind::Folder => walk(store, &item.children, on, seen, out),
+                    ItemKind::Group if on(item) => {
                         for id in &item.include {
                             if let Some(local) = store.find(id)
                                 && local.kind == ItemKind::Local
@@ -442,7 +527,7 @@ impl Store {
             }
         }
         let mut out = Vec::new();
-        walk(self, items, only_on, &mut HashSet::new(), &mut out);
+        walk(self, items, &on, &mut HashSet::new(), &mut out);
         out.join("\n")
     }
 
@@ -455,6 +540,60 @@ impl Store {
             ItemKind::Folder => self.collect(&item.children, !whole_folder),
             ItemKind::Group => self.group_content(item),
         }
+    }
+
+    // -- browser profile switches -------------------------------------------
+
+    /// The hosts content a profile's switches stand for: the local items that
+    /// are on, or included by a group that is on, in tree order.
+    pub fn switched_content(&self, switches: &[String]) -> String {
+        let on: HashSet<&str> = switches.iter().map(String::as_str).collect();
+        self.collect_with(&self.items, |item| on.contains(item.id.as_str()))
+    }
+
+    /// Switch `id` in a profile's own switch list, following the same rules
+    /// as `set_on`: a folder passes the switch down, ancestor folders follow,
+    /// and single choice turns the siblings off. The result is stored in tree
+    /// order and unknown ids are dropped.
+    pub fn set_switched(&self, switches: &[String], id: &str, on: bool) -> Vec<String> {
+        let Some(path) = path_of(&self.items, id) else {
+            return switches.to_vec();
+        };
+        let mut set: HashSet<String> = switches.iter().cloned().collect();
+        set_member(&mut set, id, on);
+        let item = node(&self.items, &path);
+        cascade_members(item, &mut set, on);
+        for depth in (1..path.len()).rev() {
+            let parent = node(&self.items, &path[..depth]);
+            if parent.folder_mode == FolderMode::Single {
+                break;
+            }
+            let all = on && parent.children.iter().all(|c| set.contains(&c.id));
+            set_member(&mut set, &parent.id, all);
+        }
+        if on {
+            let Some((&ix, parent)) = path.split_last() else {
+                return switches.to_vec();
+            };
+            let single = match parent {
+                [] => !self.multi_select,
+                _ => self.single_choice(node(&self.items, parent)),
+            };
+            if single {
+                let siblings = match parent {
+                    [] => &self.items,
+                    _ => &node(&self.items, parent).children,
+                };
+                for (i, sibling) in siblings.iter().enumerate() {
+                    if i != ix {
+                        remove_subtree(sibling, &mut set);
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        emit_members(&self.items, &set, &mut out);
+        out
     }
 
     /// Whether the item's content currently ends up in the system hosts:
@@ -524,6 +663,46 @@ fn set_subtree(item: &mut Item, on: bool) {
     item.on = on;
     for child in &mut item.children {
         set_subtree(child, on);
+    }
+}
+
+fn set_member(set: &mut HashSet<String>, id: &str, on: bool) {
+    if on {
+        set.insert(id.to_string());
+    } else {
+        set.remove(id);
+    }
+}
+
+/// Pass a folder's switch down to a profile's switch set, except in single mode.
+fn cascade_members(item: &Item, set: &mut HashSet<String>, on: bool) {
+    if item.kind != ItemKind::Folder || item.folder_mode == FolderMode::Single {
+        return;
+    }
+    for child in &item.children {
+        set_member(set, &child.id, on);
+        cascade_members(child, set, on);
+    }
+}
+
+fn remove_subtree(item: &Item, set: &mut HashSet<String>) {
+    set.remove(&item.id);
+    // Like `cascade`, a single-mode folder does not pass the switch down, so
+    // single choice leaves its children's switches alone.
+    if item.kind == ItemKind::Folder && item.folder_mode == FolderMode::Single {
+        return;
+    }
+    for child in &item.children {
+        remove_subtree(child, set);
+    }
+}
+
+fn emit_members(items: &[Item], set: &HashSet<String>, out: &mut Vec<String>) {
+    for item in items {
+        if set.contains(&item.id) {
+            out.push(item.id.clone());
+        }
+        emit_members(&item.children, set, out);
     }
 }
 
@@ -703,6 +882,8 @@ mod tests {
         Store {
             items,
             trash: Vec::new(),
+            profiles: Vec::new(),
+            trash_profiles: Vec::new(),
             multi_select,
         }
     }
@@ -720,6 +901,13 @@ mod tests {
         let mut out = Vec::new();
         walk(&store.items, &mut out);
         out
+    }
+
+    /// Titles of the profile switches, in stored (tree) order.
+    fn switched_titles<'a>(store: &'a Store, ids: &'a [String]) -> Vec<&'a str> {
+        ids.iter()
+            .filter_map(|id| store.find(id).map(|item| item.title.as_str()))
+            .collect()
     }
 
     fn id_of(store: &Store, title: &str) -> String {
@@ -875,6 +1063,143 @@ mod tests {
         assert_eq!(store.parent_of(&fid), Some(None));
         store.move_to(&aid, Some(&fid));
         assert_eq!(store.parent_of(&aid), Some(Some(fid)));
+    }
+
+    #[test]
+    fn switched_content_follows_folders_and_groups() {
+        let a = local("a", "1.1.1.1 a", false);
+        let inner = folder("inner", FolderMode::Multi, false, vec![local("c", "3.3.3.3 c", false)]);
+        let f = folder(
+            "f",
+            FolderMode::Multi,
+            false,
+            vec![local("b", "2.2.2.2 b", false), inner],
+        );
+        let mut group = Item::new(ItemKind::Group, "g");
+        group.include = vec![a.id.clone()];
+        let store = store(vec![a, f, group], true);
+        let (fid, gid) = (id_of(&store, "f"), id_of(&store, "g"));
+
+        let content = store.switched_content(&store.set_switched(&[], &fid, true));
+        assert!(content.contains("2.2.2.2 b") && content.contains("3.3.3.3 c"));
+        assert!(!content.contains("1.1.1.1 a"));
+
+        let content = store.switched_content(&store.set_switched(&[], &gid, true));
+        assert!(content.contains("1.1.1.1 a"));
+
+        assert!(store.switched_content(&[]).is_empty());
+        assert!(store.switched_content(&["missing".into()]).is_empty());
+    }
+
+    #[test]
+    fn profile_switches_cascade_and_follow_like_the_hosts_list() {
+        let a = local("a", "1.1.1.1 a", false);
+        let f = folder(
+            "f",
+            FolderMode::Multi,
+            false,
+            vec![local("b", "2.2.2.2 b", false), local("c", "3.3.3.3 c", false)],
+        );
+        let store = store(vec![a, f], true);
+        let (aid, fid, bid) = (
+            id_of(&store, "a"),
+            id_of(&store, "f"),
+            id_of(&store, "b"),
+        );
+
+        let sw = store.set_switched(&[], &fid, true);
+        assert_eq!(switched_titles(&store, &sw), ["f", "b", "c"]);
+        let sw = store.set_switched(&sw, &bid, false);
+        assert_eq!(switched_titles(&store, &sw), ["c"], "one child off turns the folder off");
+        let sw = store.set_switched(&sw, &bid, true);
+        assert_eq!(
+            switched_titles(&store, &sw),
+            ["f", "b", "c"],
+            "the folder follows once all children are on"
+        );
+        assert!(store.set_switched(&sw, &fid, false).is_empty());
+        let sw = store.set_switched(&[], &aid, true);
+        assert_eq!(switched_titles(&store, &sw), ["a"]);
+        assert_eq!(
+            store.set_switched(&sw, "missing", true),
+            sw,
+            "unknown ids leave the switches alone"
+        );
+    }
+
+    #[test]
+    fn profile_switches_follow_single_choice_and_groups() {
+        let a = local("a", "1.1.1.1 a", false);
+        let b = local("b", "2.2.2.2 b", false);
+        let mut group = Item::new(ItemKind::Group, "g");
+        group.include = vec![a.id.clone(), b.id.clone()];
+        let grouped = store(vec![a, b, group], false);
+        let (aid, gid) = (id_of(&grouped, "a"), id_of(&grouped, "g"));
+
+        let sw = grouped.set_switched(&[], &aid, true);
+        assert_eq!(switched_titles(&grouped, &sw), ["a"]);
+        let sw = grouped.set_switched(&sw, &gid, true);
+        assert_eq!(
+            switched_titles(&grouped, &sw),
+            ["g"],
+            "top-level single choice turns the sibling off"
+        );
+        let content = grouped.switched_content(&sw);
+        assert!(content.contains("1.1.1.1 a") && content.contains("2.2.2.2 b"));
+        let sw = grouped.set_switched(&sw, &aid, true);
+        assert_eq!(switched_titles(&grouped, &sw), ["a"]);
+
+        let inner = folder(
+            "single",
+            FolderMode::Single,
+            false,
+            vec![local("x", "4.4.4.4 x", false), local("y", "5.5.5.5 y", false)],
+        );
+        let single = store(vec![inner], true);
+        let (sid, xid) = (id_of(&single, "single"), id_of(&single, "x"));
+        let sw = single.set_switched(&[], &sid, true);
+        assert_eq!(
+            switched_titles(&single, &sw),
+            ["single"],
+            "a single-mode folder does not pass the switch down"
+        );
+        let sw = single.set_switched(&[], &xid, true);
+        assert_eq!(
+            switched_titles(&single, &sw),
+            ["x"],
+            "a single-mode folder does not follow its children"
+        );
+    }
+
+    #[test]
+    fn single_choice_spares_a_single_mode_folders_children_like_set_on() {
+        let make = || {
+            let a = local("a", "1.1.1.1 a", false);
+            let x = local("x", "4.4.4.4 x", true);
+            let f = folder("f", FolderMode::Single, false, vec![x]);
+            store(vec![a, f], false)
+        };
+        let mut hosts = make();
+        let aid = id_of(&hosts, "a");
+        hosts.set_on(&aid, true);
+        assert!(hosts.enabled_content().contains("4.4.4.4 x"));
+
+        let profiles = make();
+        let (aid, xid) = (id_of(&profiles, "a"), id_of(&profiles, "x"));
+        let sw = profiles.set_switched(&[xid], &aid, true);
+        assert_eq!(switched_titles(&profiles, &sw), ["a", "x"]);
+        assert!(profiles.switched_content(&sw).contains("4.4.4.4 x"));
+    }
+
+    #[test]
+    fn new_profiles_get_palette_colors_round_robin() {
+        let mut store = Store::default();
+        let a = store.add_profile("a");
+        let b = store.add_profile("b");
+        assert_eq!(store.profile(&a).unwrap().tile_color, Some(crate::browser::TILE_PALETTE[0]));
+        assert_eq!(store.profile(&b).unwrap().tile_color, Some(crate::browser::TILE_PALETTE[1]));
+        let copy = store.duplicate_profile(&a).unwrap();
+        assert_eq!(store.profile(&copy).unwrap().tile_color, Some(crate::browser::TILE_PALETTE[0]));
     }
 
     /// Titles in tree order, children in brackets.

@@ -371,6 +371,8 @@ mod tests {
         let store = Store {
             items: vec![folder, group],
             trash: Vec::new(),
+            profiles: Vec::new(),
+            trash_profiles: Vec::new(),
             multi_select: true,
         };
 

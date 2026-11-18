@@ -250,6 +250,260 @@ more_color_themes:
   zh-TW: "更多配色"
   en: "More Themes"
 
+# Browser profiles
+browser_profiles:
+  zh-CN: "浏览器方案"
+  zh-TW: "瀏覽器方案"
+  en: "Browser Profiles"
+profile_add:
+  zh-CN: "新建浏览器方案"
+  zh-TW: "新增瀏覽器方案"
+  en: "New Browser Profile"
+profile_default_name:
+  zh-CN: "未命名方案"
+  zh-TW: "未命名方案"
+  en: "Untitled Profile"
+profile_empty_title:
+  zh-CN: "还没有浏览器方案"
+  zh-TW: "還沒有瀏覽器方案"
+  en: "No browser profiles yet"
+profile_empty_hint:
+  zh-CN: "为不同环境各建一个方案，自己打开要注入的 hosts 条目，不会修改系统 hosts 文件。"
+  zh-TW: "為不同環境各建一個方案，自行開啟要注入的 hosts 項目，不會修改系統 hosts 檔案。"
+  en: "Create one profile per environment and turn on the hosts items it injects; the system hosts file is never modified."
+profile_tree_empty:
+  zh-CN: "还没有 hosts 条目，先在 hosts 列表中新建一些。"
+  zh-TW: "還沒有 hosts 項目，請先在 hosts 清單中新增。"
+  en: "No hosts items yet; add some in the hosts list first."
+profile_name:
+  zh-CN: "方案名称"
+  zh-TW: "方案名稱"
+  en: "Name"
+profile_browser:
+  zh-CN: "浏览器"
+  zh-TW: "瀏覽器"
+  en: "Browser"
+profile_path:
+  zh-CN: "启动路径"
+  zh-TW: "啟動路徑"
+  en: "Executable"
+profile_path_placeholder:
+  zh-CN: "留空则自动查找安装位置"
+  zh-TW: "留空則自動尋找安裝位置"
+  en: "Leave empty to detect the installation"
+profile_path_hint:
+  zh-CN: "便携版或被改名的浏览器可以指定可执行文件，手动输入或点右侧按钮选择。"
+  zh-TW: "可攜版或被改名的瀏覽器可以指定執行檔，手動輸入或點右側按鈕選擇。"
+  en: "Set the executable for portable or renamed installs, by typing or with the picker button."
+choose_path:
+  zh-CN: "选择浏览器…"
+  zh-TW: "選擇瀏覽器…"
+  en: "Choose browser…"
+profile_mode:
+  zh-CN: "启动方式"
+  zh-TW: "啟動方式"
+  en: "Launch Mode"
+profile_color:
+  zh-CN: "方案色"
+  zh-TW: "方案色"
+  en: "Profile Color"
+profile_color_hint:
+  zh-CN: "同时用于窗口色带、Dock / 任务栏标记和图标角标。"
+  zh-TW: "同時用於視窗色帶、Dock / 工作列標記和圖示角標。"
+  en: "Tints the window, marks the Dock / taskbar and fills the icon badge."
+profile_color_placeholder:
+  zh-CN: "选择颜色"
+  zh-TW: "選擇顏色"
+  en: "Pick a color"
+profile_image:
+  zh-CN: "方案图标"
+  zh-TW: "方案圖示"
+  en: "Profile icon"
+profile_image_hint:
+  zh-CN: "用所选图片替换图标，图片上不显示角标。"
+  zh-TW: "用所選圖片取代圖示，圖片上不顯示角標。"
+  en: "Replaces the icon with your picture, which carries no badge."
+choose_image:
+  zh-CN: "选择图片…"
+  zh-TW: "選擇圖片…"
+  en: "Choose image…"
+picker_images:
+  zh-CN: "图片"
+  zh-TW: "圖片"
+  en: "Images"
+picker_all_files:
+  zh-CN: "所有文件"
+  zh-TW: "所有檔案"
+  en: "All files"
+image_custom:
+  zh-CN: "自定义图片"
+  zh-TW: "自訂圖片"
+  en: "Custom image"
+rev_image:
+  zh-CN: "修改方案图标"
+  zh-TW: "修改方案圖示"
+  en: "Icon"
+err_image_load:
+  zh-CN: "无法读取图片"
+  zh-TW: "無法讀取圖片"
+  en: "Cannot read the image"
+err_app_executable:
+  zh-CN: "无法定位包内可执行文件"
+  zh-TW: "無法定位包內可執行檔"
+  en: "Cannot locate the executable inside the bundle"
+mode_independent:
+  zh-CN: "独立实例"
+  zh-TW: "獨立執行個體"
+  en: "Independent Profile"
+mode_ephemeral:
+  zh-CN: "临时会话"
+  zh-TW: "臨時工作階段"
+  en: "Incognito Session"
+mode_default:
+  zh-CN: "默认会话"
+  zh-TW: "預設工作階段"
+  en: "Default Session"
+mode_independent_short:
+  zh-CN: "独立"
+  zh-TW: "獨立"
+  en: "Independent"
+mode_ephemeral_short:
+  zh-CN: "临时"
+  zh-TW: "臨時"
+  en: "Incognito"
+mode_default_short:
+  zh-CN: "默认"
+  zh-TW: "預設"
+  en: "Default"
+mode_independent_hint:
+  zh-CN: "使用独立的用户数据目录，登录状态会保留。"
+  zh-TW: "使用獨立的資料目錄，登入狀態會保留。"
+  en: "Uses its own user data directory, so sign-ins persist."
+mode_ephemeral_hint:
+  zh-CN: "以无痕模式启动到临时目录，浏览器退出后自动删除。"
+  zh-TW: "以無痕模式啟動到暫存目錄，瀏覽器結束後自動刪除。"
+  en: "Starts incognito in a temporary directory that is deleted when the browser exits."
+mode_default_hint:
+  zh-CN: "使用 %{name} 当前的用户配置，需要先完全退出浏览器。"
+  zh-TW: "使用 %{name} 目前的設定檔，需要先完全結束瀏覽器。"
+  en: "Uses the current %{name} profile; the browser must be fully quit first."
+profile_mappings:
+  zh-CN: "映射规则"
+  zh-TW: "對應規則"
+  en: "Mappings"
+mappings_count:
+  zh-CN: "%{count} 条映射"
+  zh-TW: "%{count} 條對應"
+  en: "%{count} mappings"
+copy_command:
+  zh-CN: "复制命令"
+  zh-TW: "複製命令"
+  en: "Copy Command"
+cmd_copied:
+  zh-CN: "启动命令已复制"
+  zh-TW: "啟動命令已複製"
+  en: "Launch command copied"
+cmd_copy_blocked:
+  zh-CN: "命令过长，无法复制"
+  zh-TW: "命令過長，無法複製"
+  en: "The command is too long to copy"
+launch:
+  zh-CN: "启动"
+  zh-TW: "啟動"
+  en: "Launch"
+launched:
+  zh-CN: "已在 %{name} 中打开“%{profile}”"
+  zh-TW: "已在 %{name} 中開啟「%{profile}」"
+  en: "Opened \"%{profile}\" in %{name}"
+stop:
+  zh-CN: "停止"
+  zh-TW: "停止"
+  en: "Stop"
+browser_stopped:
+  zh-CN: "已停止 %{name}"
+  zh-TW: "已停止 %{name}"
+  en: "Stopped %{name}"
+profile_ready:
+  zh-CN: "就绪"
+  zh-TW: "就緒"
+  en: "Ready"
+profile_running:
+  zh-CN: "运行中"
+  zh-TW: "執行中"
+  en: "Running"
+block_no_mappings:
+  zh-CN: "没有可用的映射，请先打开一些 hosts 条目"
+  zh-TW: "沒有可用的對應，請先開啟一些 hosts 項目"
+  en: "No mappings; turn on some hosts items first"
+block_browser_missing:
+  zh-CN: "未找到 %{name}，请填写启动路径"
+  zh-TW: "找不到 %{name}，請填寫啟動路徑"
+  en: "%{name} not found; set the executable path"
+block_too_long:
+  zh-CN: "映射过多，命令超过 %{limit} 个字符"
+  zh-TW: "對應過多，命令超過 %{limit} 個字元"
+  en: "Too many mappings; the command exceeds %{limit} characters"
+block_running:
+  zh-CN: "%{name} 正在运行；新的规则要等它完全退出后才会生效"
+  zh-TW: "%{name} 正在執行；新的規則要等它完全結束後才會生效"
+  en: "%{name} is running; the new rules apply only after it is quit completely"
+duplicate_profile:
+  zh-CN: "复制方案"
+  zh-TW: "複製方案"
+  en: "Duplicate"
+hosts_entry:
+  zh-CN: "hosts 项目"
+  zh-TW: "hosts 項目"
+  en: "hosts item"
+profile_history:
+  zh-CN: "“%{name}”的修改记录"
+  zh-TW: "「%{name}」的修改紀錄"
+  en: "Changes to \"%{name}\""
+profile_restored:
+  zh-CN: "已恢复方案设置"
+  zh-TW: "已還原方案設定"
+  en: "Profile settings restored"
+rev_mode:
+  zh-CN: "启动方式"
+  zh-TW: "啟動方式"
+  en: "Launch mode"
+rev_browser:
+  zh-CN: "浏览器"
+  zh-TW: "瀏覽器"
+  en: "Browser"
+rev_name:
+  zh-CN: "名称"
+  zh-TW: "名稱"
+  en: "Name"
+rev_path:
+  zh-CN: "启动路径"
+  zh-TW: "啟動路徑"
+  en: "Executable"
+rev_color:
+  zh-CN: "修改方案色"
+  zh-TW: "修改方案色"
+  en: "Color"
+rev_selection:
+  zh-CN: "修改开关"
+  zh-TW: "修改開關"
+  en: "Switches"
+rev_restore:
+  zh-CN: "恢复前快照"
+  zh-TW: "還原前快照"
+  en: "Before restore"
+err_browser_running:
+  zh-CN: "%{name} 正在运行，请先完全退出浏览器"
+  zh-TW: "%{name} 正在執行，請先完全結束瀏覽器"
+  en: "%{name} is running; quit the browser completely first"
+err_launch_browser:
+  zh-CN: "无法启动浏览器"
+  zh-TW: "無法啟動瀏覽器"
+  en: "Could not launch the browser"
+err_stop_browser:
+  zh-CN: "没有找到正在运行的 %{name}"
+  zh-TW: "找不到執行中的 %{name}"
+  en: "No running %{name} found"
+
 # Import / export
 import:
   zh-CN: "导入"
@@ -477,6 +731,10 @@ auto_check_updates:
   zh-CN: "自动检查更新"
   zh-TW: "自動檢查更新"
   en: "Automatically check for updates"
+mark_launched:
+  zh-CN: "标记启动的浏览器（窗口色带与系统图标）"
+  zh-TW: "標記啟動的瀏覽器（視窗色帶與系統圖示）"
+  en: "Mark launched browsers (window tint and system icon)"
 update_not_configured:
   zh-CN: "未配置更新源"
   zh-TW: "未設定更新來源"
