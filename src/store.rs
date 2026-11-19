@@ -624,6 +624,16 @@ impl Store {
         }
         self.items = imported;
     }
+
+    /// Replace all profiles with `imported`, moving the current ones to the trash.
+    pub fn replace_profiles(&mut self, imported: Vec<crate::browser::BrowserProfile>) {
+        let current = std::mem::take(&mut self.profiles);
+        let deleted_at = now();
+        for profile in current.into_iter().rev() {
+            self.trash_profiles.insert(0, TrashedProfile { profile, deleted_at });
+        }
+        self.profiles = imported;
+    }
 }
 
 /// Child indices leading from `items` to the item `id`.
@@ -809,15 +819,21 @@ pub fn export(store: &Store, path: &Path) -> Result<()> {
     write_json(path, &crate::switchhosts::export_v4(store))
 }
 
+/// An imported backup: the items, the top-level choice mode when the backup
+/// names it, and the browser profiles this app carries (`None` leaves the
+/// current profiles untouched).
+pub type Imported = (Vec<Item>, Option<bool>, Option<Vec<crate::browser::BrowserProfile>>);
+
 /// Parse a backup written by this app or by SwitchHosts (v3/v4/v5). Imported
 /// items get fresh ids so they never collide with items in the trash.
-pub fn import(text: &str) -> Result<(Vec<Item>, Option<bool>)> {
+pub fn import(text: &str) -> Result<Imported> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let value: Value = serde_json::from_str(text).localize("err_invalid_json")?;
 
     if crate::switchhosts::is_backup(&value) {
         let multi = crate::switchhosts::multi_select(&value);
-        return Ok((crate::switchhosts::parse(&value)?, multi));
+        let (items, profiles) = crate::switchhosts::parse(&value)?;
+        return Ok((items, multi, profiles));
     }
 
     if value.get("app").and_then(Value::as_str) == Some("SwitchHostsLite") {
@@ -825,7 +841,7 @@ pub fn import(text: &str) -> Result<(Vec<Item>, Option<bool>)> {
         let mut ids = HashMap::new();
         refresh_ids(&mut backup.items, &mut ids);
         crate::switchhosts::remap_includes(&mut backup.items, &ids);
-        return Ok((backup.items, Some(backup.multi_select)));
+        return Ok((backup.items, Some(backup.multi_select), None));
     }
 
     Err(LocalizedError::new("err_unknown_format").into())
@@ -1340,7 +1356,7 @@ mod tests {
                 {"id":"y","title":"Remote","type":"remote","on":true}]}
         ]},"collection":{"hosts":{"data":[{"id":"x","content":"127.0.0.1 dev"}]}}},
         "version":[4,2,0,6100]}"#;
-        let (items, multi) = import(text).unwrap();
+        let (items, multi, _) = import(text).unwrap();
         let store = store(items, true);
         assert_eq!(store.items[0].content, "127.0.0.1 dev");
         assert!(on_titles(&store).is_empty() && multi.is_none());
@@ -1353,7 +1369,7 @@ mod tests {
         let text = r#"{"app":"SwitchHostsLite","version":1,"multi_select":false,"items":[
             {"id":"a","title":"A","kind":"local","on":true,"content":"1.1.1.1 a"},
             {"id":"g","title":"G","kind":"group","include":["a"]}]}"#;
-        let (items, multi) = import(text).unwrap();
+        let (items, multi, _) = import(text).unwrap();
         assert_eq!(multi, Some(false));
         assert!(items[0].on && items[0].id != "a");
         assert_eq!(items[1].include, [items[0].id.clone()]);
@@ -1380,7 +1396,7 @@ mod tests {
         );
 
         let text = serde_json::to_string(&crate::switchhosts::export_v4(&original)).unwrap();
-        let (items, multi) = import(&text).unwrap();
+        let (items, multi, _) = import(&text).unwrap();
         let imported = store(items, multi.unwrap());
         assert!(!imported.multi_select);
         assert_eq!(imported.enabled_content(), original.enabled_content());
@@ -1388,6 +1404,45 @@ mod tests {
         assert_eq!(on_titles(&imported), on_titles(&original));
         let modes: Vec<_> = imported.items[1..4].iter().map(|f| f.folder_mode).collect();
         assert_eq!(modes, [FolderMode::Single, FolderMode::Default, FolderMode::Multi]);
+    }
+
+    #[test]
+    fn export_then_import_carries_profiles_with_remapped_switches() {
+        let a = local("a", "1.1.1.1 a", true);
+        let b = local("b", "2.2.2.2 b", false);
+        let mut original = store(vec![a.clone(), b.clone()], false);
+        let mut profile = crate::browser::BrowserProfile::new("Work");
+        profile.switches = vec![a.id.clone()];
+        profile.collapsed = vec![b.id.clone()];
+        profile.tile_color = Some([1, 2, 3]);
+        profile.custom_image = true;
+        profile.revs.push(crate::browser::ProfileRev {
+            id: new_id(),
+            created_at: 0,
+            kind: crate::browser::RevKind::Name,
+            snapshot: profile.snapshot(),
+        });
+        original.profiles.push(profile);
+
+        let text = serde_json::to_string(&crate::switchhosts::export_v4(&original)).unwrap();
+        let (items, _multi, profiles) = import(&text).unwrap();
+        let profiles = profiles.expect("this app's export carries profiles");
+        assert_eq!(profiles.len(), 1);
+        let imported = &profiles[0];
+        assert_eq!(imported.name, "Work");
+        assert_eq!(imported.tile_color, Some([1, 2, 3]));
+        assert!(!imported.custom_image && imported.revs.is_empty());
+        assert_ne!(imported.id, original.profiles[0].id);
+        assert_eq!(imported.switches, vec![items[0].id.clone()]);
+        assert_eq!(imported.collapsed, vec![items[1].id.clone()]);
+        assert_ne!(imported.switches[0], a.id);
+    }
+
+    #[test]
+    fn switchhosts_backup_carries_no_profiles() {
+        let text = r#"{"version":[4],"data":{"list":{"tree":[{"id":"a","type":"local","title":"A"}]},"collection":{"hosts":{"data":[{"id":"a","content":"1.1.1.1 a"}]}}}}"#;
+        let (_items, _multi, profiles) = import(text).unwrap();
+        assert!(profiles.is_none());
     }
 
     #[test]

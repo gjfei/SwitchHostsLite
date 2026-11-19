@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::browser::BrowserProfile;
 use crate::i18n::LocalizedError;
 use crate::store::{FolderMode, Item, ItemKind, Store, new_id};
 
@@ -41,10 +42,12 @@ pub fn multi_select(value: &Value) -> Option<bool> {
     value[LITE_KEY]["multi_select"].as_bool()
 }
 
-/// Convert a SwitchHosts backup into items with fresh ids. Like SwitchHosts
-/// itself, everything (folders included) is imported switched off and system
-/// nodes are skipped, except that exports of this app keep their on/off state.
-pub fn parse(value: &Value) -> Result<Vec<Item>> {
+/// Convert a SwitchHosts backup into items with fresh ids, plus the browser
+/// profiles carried in this app's `switchhosts_lite` extension key (`None` for a
+/// plain SwitchHosts backup). Like SwitchHosts itself, everything (folders
+/// included) is imported switched off and system nodes are skipped, except that
+/// exports of this app keep their on/off state.
+pub fn parse(value: &Value) -> Result<(Vec<Item>, Option<Vec<BrowserProfile>>)> {
     let mut contents = HashMap::new();
     let keep_on = value[LITE_KEY].is_object();
     let (nodes, version) = if value["format"] == "switchhosts-backup" {
@@ -112,7 +115,8 @@ pub fn parse(value: &Value) -> Result<Vec<Item>> {
     if items.is_empty() {
         fail!("err_empty_backup");
     }
-    Ok(items)
+    let profiles = parse_profiles(value, &ids);
+    Ok((items, profiles))
 }
 
 /// How the nodes of a backup are read.
@@ -231,6 +235,29 @@ pub(crate) fn remap_includes(items: &mut [Item], ids: &HashMap<String, String>) 
     }
 }
 
+/// Read the browser profiles this app exports under `switchhosts_lite`. Their
+/// switches and collapsed folders reference item ids, remapped through the same
+/// old→new table as the items; custom pictures and revision history are not
+/// carried, so the icon recomposites and the history starts empty. `None` when
+/// the backup has no profile section, leaving the current profiles untouched.
+fn parse_profiles(value: &Value, ids: &HashMap<String, String>) -> Option<Vec<BrowserProfile>> {
+    let profiles = value[LITE_KEY]["profiles"].as_array()?;
+    Some(
+        profiles
+            .iter()
+            .filter_map(|v| serde_json::from_value::<BrowserProfile>(v.clone()).ok())
+            .map(|mut profile| {
+                profile.id = new_id();
+                profile.switches = profile.switches.iter().filter_map(|id| ids.get(id).cloned()).collect();
+                profile.collapsed = profile.collapsed.iter().filter_map(|id| ids.get(id).cloned()).collect();
+                profile.custom_image = false;
+                profile.revs.clear();
+                profile
+            })
+            .collect(),
+    )
+}
+
 /// Serialize the store as a SwitchHosts v4 backup, with every switch as is.
 pub fn export_v4(store: &Store) -> Value {
     let mut hosts = Vec::new();
@@ -257,7 +284,17 @@ pub fn export_v4(store: &Store) -> Value {
             "collection": { "hosts": { "data": hosts } },
         },
     });
-    backup[LITE_KEY] = json!({ "multi_select": store.multi_select });
+    let profiles: Vec<Value> = store
+        .profiles
+        .iter()
+        .map(|profile| {
+            let mut clean = profile.clone();
+            clean.revs.clear();
+            clean.custom_image = false;
+            serde_json::to_value(&clean).unwrap_or_default()
+        })
+        .collect();
+    backup[LITE_KEY] = json!({ "multi_select": store.multi_select, "profiles": profiles });
     backup
 }
 
@@ -312,7 +349,7 @@ mod tests {
             "collection":{"hosts":{"data":[
                 {"_id":"x1","id":"a","content":"127.0.0.1 dev\r\n"},
                 {"_id":"x2","id":"r","content":"1.1.1.1 remote"}]}}}});
-        let items = parse(&backup).unwrap();
+        let items = parse(&backup).unwrap().0;
         assert_eq!(titles(&items), ["Dev", "Team", "Both"]);
         assert!(!items[0].on && !items[1].on && !items[1].children[0].on);
         assert_eq!(items[0].content, "127.0.0.1 dev\n");
@@ -336,7 +373,7 @@ mod tests {
         let v3 = json!({"version":[3,3],"list":[
             {"id":0,"content":"sys"},
             {"id":12,"where":"folder","children":[{"id":13,"where":"local","on":true,"content":"x"}]}]});
-        let items = parse(&v3).unwrap();
+        let items = parse(&v3).unwrap().0;
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].children[0].content, "x");
 
@@ -348,7 +385,7 @@ mod tests {
                 {"id":"d","type":"folder","title":"D","folder":{"mode":0}},
                 {"id":"m","type":"folder","title":"M","folder_mode":2}]},
             "entries":{"l":"2.2.2.2 l"}});
-        let items = parse(&v5).unwrap();
+        let items = parse(&v5).unwrap().0;
         assert_eq!(items[0].folder_mode, FolderMode::Single);
         assert!(!items[0].on && !items[0].children[0].on);
         assert_eq!(items[0].children[0].content, "2.2.2.2 l");
@@ -385,14 +422,14 @@ mod tests {
         assert!(exported["data"]["collection"]["hosts"]["data"][0]["_id"].is_string());
         assert_eq!(multi_select(&exported), Some(true));
 
-        let items = parse(&exported).unwrap();
+        let items = parse(&exported).unwrap().0;
         assert!(!items[0].on && items[0].children[0].on && items[1].on);
         assert_eq!(items[0].children[0].content, "1.1.1.1 a");
         assert_eq!(items[1].include, [items[0].children[0].id.clone()]);
 
         let mut foreign = exported;
         foreign.as_object_mut().unwrap().remove(LITE_KEY);
-        let items = parse(&foreign).unwrap();
+        let items = parse(&foreign).unwrap().0;
         assert!(!items[0].children[0].on && !items[1].on);
     }
 }

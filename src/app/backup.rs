@@ -5,6 +5,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use super::{Selection, SwitchHostsApp};
+use crate::browser::BrowserProfile;
 use crate::i18n::error_text;
 use crate::store::{self, Item};
 
@@ -51,7 +52,7 @@ impl SwitchHostsApp {
                 .map_err(anyhow::Error::from)
                 .and_then(|text| store::import(&text));
             this.update_in(cx, |this, window, cx| match result {
-                Ok((items, multi)) => this.confirm_import(items, multi, window, cx),
+                Ok((items, multi, profiles)) => this.confirm_import(items, multi, profiles, window, cx),
                 Err(err) => {
                     let message = t!("import_failed", error = error_text(&err));
                     Self::notify_error(window, message, cx)
@@ -62,21 +63,31 @@ impl SwitchHostsApp {
         .detach();
     }
 
-    fn confirm_import(&mut self, items: Vec<Item>, multi: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
+    fn confirm_import(
+        &mut self,
+        items: Vec<Item>,
+        multi: Option<bool>,
+        profiles: Option<Vec<BrowserProfile>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let view = cx.entity();
         let count = items.len();
         window.open_alert_dialog(cx, move |alert, _, _| {
-            let (view, items) = (view.clone(), items.clone());
+            let (view, items, profiles) = (view.clone(), items.clone(), profiles.clone());
             alert
                 .confirm()
                 .title(t!("import"))
                 .description(t!("import_confirm", count = count))
                 .on_ok(move |_, window, cx| {
-                    let items = items.clone();
+                    let (items, profiles) = (items.clone(), profiles.clone());
                     view.update(cx, |this, cx| {
                         this.store.replace_items(items);
                         if let Some(multi) = multi {
                             this.store.multi_select = multi;
+                        }
+                        if let Some(profiles) = profiles {
+                            this.store.replace_profiles(profiles);
                         }
                         this.select(Selection::System, window, cx);
                         this.store_changed(window, cx);
