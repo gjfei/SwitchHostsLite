@@ -639,7 +639,7 @@ fn main_process_pids(ps_output: &str, arg: &str) -> Vec<u32> {
 }
 
 /// The everyday browser's processes, matched by name instead of a directory.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn default_main_pids(ps_output: &str, kind: BrowserKind) -> Vec<u32> {
     main_pids(ps_output, |command| is_default_main(command, kind))
 }
@@ -828,11 +828,11 @@ mod tests {
         let maps = vec![("ads.example.com".into(), "0.0.0.0".into())];
         let mut profile = BrowserProfile::new("p");
         profile.id = "p1".into();
-        let independent = build_cmd(&profile, &maps, Path::new("/data"), Path::new("/tmp"), None);
+        let independent = build_cmd(&profile, &maps, Path::new("/data"), Path::new("/tmp"), None).replace('\\', "/");
         assert!(independent.contains("--user-data-dir=\"/data/browser-profiles/p1\""));
         assert!(!independent.contains("--incognito"));
         profile.mode = ProfileMode::Ephemeral;
-        let ephemeral = build_cmd(&profile, &maps, Path::new("/data"), Path::new("/tmp"), None);
+        let ephemeral = build_cmd(&profile, &maps, Path::new("/data"), Path::new("/tmp"), None).replace('\\', "/");
         assert!(ephemeral.contains("--incognito --user-data-dir=\"/tmp/shl-ephemeral-p1\""));
         profile.mode = ProfileMode::Default;
         let default = build_cmd(&profile, &maps, Path::new("/data"), Path::new("/tmp"), None);
@@ -892,6 +892,8 @@ mod tests {
         }
     }
 
+    // macOS ps lines and bundle paths; Windows cannot list command lines.
+    #[cfg(target_os = "macos")]
     #[test]
     fn running_profiles_match_the_user_data_dir() {
         let mut independent = BrowserProfile::new("a");
@@ -926,6 +928,7 @@ mod tests {
         assert!(matching_profiles(&lines, &profiles[2..], data, tmp).is_empty());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_everyday_instance_is_matched_without_a_profile_directory() {
         let mut everyday = BrowserProfile::new("c");
@@ -959,6 +962,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn stopping_the_default_targets_the_everyday_process() {
         let ps = "  200 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n\
