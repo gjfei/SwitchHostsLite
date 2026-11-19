@@ -23,19 +23,20 @@ pub fn cmd_limit() -> usize {
 #[serde(rename_all = "lowercase")]
 pub enum BrowserKind {
     #[default]
+    // Older backups may still say "brave"; load those as Chrome rather than
+    // failing the whole data file.
+    #[serde(alias = "brave")]
     Chrome,
     Edge,
-    Brave,
 }
 
 impl BrowserKind {
-    pub const ALL: [Self; 3] = [Self::Chrome, Self::Edge, Self::Brave];
+    pub const ALL: [Self; 2] = [Self::Chrome, Self::Edge];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Chrome => "Google Chrome",
             Self::Edge => "Microsoft Edge",
-            Self::Brave => "Brave Browser",
         }
     }
 
@@ -43,7 +44,6 @@ impl BrowserKind {
         match self {
             Self::Chrome => "Chrome",
             Self::Edge => "Edge",
-            Self::Brave => "Brave",
         }
     }
 
@@ -53,7 +53,6 @@ impl BrowserKind {
         match self {
             Self::Chrome => "Google Chrome",
             Self::Edge => "Microsoft Edge",
-            Self::Brave => "Brave Browser",
         }
     }
 
@@ -61,7 +60,6 @@ impl BrowserKind {
         match self {
             Self::Chrome => "chrome.exe",
             Self::Edge => "msedge.exe",
-            Self::Brave => "brave.exe",
         }
     }
 
@@ -71,7 +69,6 @@ impl BrowserKind {
         match self {
             Self::Chrome => ("Google", "Chrome"),
             Self::Edge => ("Microsoft", "Edge"),
-            Self::Brave => ("BraveSoftware", "Brave-Browser"),
         }
     }
 
@@ -1030,11 +1027,16 @@ mod tests {
         assert!(paths[2].starts_with(r"C:\Local"));
         let paths = windows_candidates(BrowserKind::Edge, r"C:\PF", r"C:\PF86", "");
         assert_eq!(paths.len(), 2);
-        let brave = windows_candidates(BrowserKind::Brave, r"C:\PF", r"C:\PF86", "");
-        assert!(brave[0]
+        assert!(paths[0]
             .to_string_lossy()
             .replace('\\', "/")
-            .ends_with("BraveSoftware/Brave-Browser/Application/brave.exe"));
+            .ends_with("Microsoft/Edge/Application/msedge.exe"));
+    }
+
+    #[test]
+    fn legacy_brave_kind_deserializes_as_chrome() {
+        let kind: BrowserKind = serde_json::from_str("\"brave\"").unwrap();
+        assert_eq!(kind, BrowserKind::Chrome);
     }
 
     #[test]
