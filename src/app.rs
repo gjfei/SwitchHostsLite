@@ -720,8 +720,7 @@ impl SwitchHostsApp {
         let maps = self.profile_maps();
         let mark = browser::mark_color(profile);
         let cmd = browser::build_cmd(profile, &maps, &store::data_dir(), &std::env::temp_dir(), mark);
-        let running = self.profile_running(profile);
-        browser::block_reason(profile, maps.len(), cmd.len(), running)
+        browser::block_reason(profile, cmd.len())
     }
 
     /// Whether the profile's browser is open, as far as this app can tell.

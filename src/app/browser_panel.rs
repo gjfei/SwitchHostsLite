@@ -115,10 +115,8 @@ pub(super) fn rev_kind_label(kind: RevKind) -> SharedString {
 
 pub(super) fn block_label(block: browser::Block, browser: BrowserKind) -> SharedString {
     match block {
-        browser::Block::NoMappings => t!("block_no_mappings"),
         browser::Block::Missing => t!("block_browser_missing", name = browser.name()),
         browser::Block::TooLong => t!("block_too_long", limit = browser::cmd_limit()),
-        browser::Block::Running => t!("block_running", name = browser.name()),
     }
     .into()
 }
@@ -449,7 +447,7 @@ impl SwitchHostsApp {
         self.refresh_profile_tile(cx);
     }
 
-    fn image_controls(&self, profile: &BrowserProfile, cx: &Context<Self>) -> AnyElement {
+    fn image_controls(&self, profile: &BrowserProfile, locked: bool, cx: &Context<Self>) -> AnyElement {
         use gpui_kit::component::attachment::{Attachment, AttachmentMedia};
 
         let theme = cx.theme();
@@ -510,8 +508,9 @@ impl SwitchHostsApp {
             .child(attachment)
             // The scrim and its pencil appear together on hover. The pencil is
             // a plain icon, not a ghost Button, so it paints with the scrim
-            // instead of waiting for the pointer to reach the middle.
-            .when(hovered, |this| {
+            // instead of waiting for the pointer to reach the middle. A running
+            // profile is read-only, so neither overlay is offered.
+            .when(hovered && !locked, |this| {
                 this.child(
                     div()
                         .absolute()
@@ -542,7 +541,7 @@ impl SwitchHostsApp {
             })
             // The clear cross shows only on hover too, painted after the scrim
             // so it stays on top and takes the click.
-            .when(hovered && profile.custom_image, |this| {
+            .when(hovered && !locked && profile.custom_image, |this| {
                 this.child(
                     div()
                         .id("profile-icon-clear")
@@ -580,7 +579,7 @@ impl SwitchHostsApp {
     /// slot, so any clear button placed over it gets swallowed. Drawing the
     /// field ourselves keeps the full palette (HSV + hex) and lets the cross
     /// live beside the trigger as an ordinary, independently-clickable child.
-    fn color_controls(&self, cx: &Context<Self>) -> AnyElement {
+    fn color_controls(&self, locked: bool, cx: &Context<Self>) -> AnyElement {
         let Some(inputs) = &self.profile_inputs else {
             return div().into_any_element();
         };
@@ -591,6 +590,32 @@ impl SwitchHostsApp {
         let marked = inputs.color.read(cx).value().is_some();
         let theme = cx.theme();
         let (bg, fg) = (theme.input_background(), theme.foreground);
+
+        // `ColorPicker` has no disabled state, so a running profile gets a
+        // plain read-only swatch + hex instead of the popover trigger.
+        if locked {
+            let value = inputs.color.read(cx).value();
+            return h_flex()
+                .id("profile-color-field")
+                .w_full()
+                .h(px(30.))
+                .items_center()
+                .gap_2()
+                .px_2()
+                .bg(theme.muted)
+                .text_color(theme.muted_foreground)
+                .border_1()
+                .border_color(theme.input)
+                .rounded(theme.radius)
+                .when_some(value, |this, c| {
+                    this.child(div().flex_shrink_0().size(px(14.)).rounded(px(3.)).bg(c))
+                })
+                .child(div().flex_1().min_w_0().truncate().child(match value {
+                    Some(c) => SharedString::from(c.to_hex()),
+                    None => t!("profile_color_placeholder").into(),
+                }))
+                .into_any_element();
+        }
 
         h_flex()
             .id("profile-color-field")
@@ -667,8 +692,7 @@ impl SwitchHostsApp {
     pub(super) fn block_for(&self, profile: &BrowserProfile, maps: &[(String, String)]) -> Option<browser::Block> {
         let mark = browser::mark_color(profile);
         let cmd = browser::build_cmd(profile, maps, &store::data_dir(), &std::env::temp_dir(), mark);
-        let running = self.profile_running(profile);
-        browser::block_reason(profile, maps.len(), cmd.len(), running)
+        browser::block_reason(profile, cmd.len())
     }
 
     // -- list ----------------------------------------------------------------
@@ -837,6 +861,7 @@ impl SwitchHostsApp {
                     this.block_for(profile, &maps)
                 })
                 .is_some();
+            let running = this.store.profile(&id).is_some_and(|p| this.profile_running(p));
             let launch_item = menu_entry(&view, t!("launch"), {
                 let id = id.clone();
                 move |this, window, cx| this.launch_profile_by_id(id.clone(), window, cx)
@@ -858,9 +883,12 @@ impl SwitchHostsApp {
                     this.duplicate_profile(dup_id.clone(), window, cx)
                 }))
                 .separator()
-                .item(menu_entry(&view, t!("move_to_trash"), move |this, window, cx| {
-                    this.confirm_delete_profile(delete_id.clone(), window, cx)
-                }))
+                .item(
+                    menu_entry(&view, t!("move_to_trash"), move |this, window, cx| {
+                        this.confirm_delete_profile(delete_id.clone(), window, cx)
+                    })
+                    .disabled(running),
+                )
         }
     }
 
@@ -919,7 +947,8 @@ impl SwitchHostsApp {
                 .into_any_element()
         } else {
             let mut rows = Vec::new();
-            self.render_switch_rows(&self.store.items, 0, profile, &mut rows, cx);
+            let locked = self.profile_running(profile);
+            self.render_switch_rows(&self.store.items, 0, profile, locked, &mut rows, cx);
             v_flex()
                 .id("profile-tree")
                 .flex_1()
@@ -934,9 +963,6 @@ impl SwitchHostsApp {
         };
         let maps = browser::mappings(&self.store.switched_content(&profile.switches));
         let status = match self.block_for(profile, &maps) {
-            // The count on the left already says there are no mappings, so the
-            // reason is not repeated on the right.
-            Some(browser::Block::NoMappings) => None,
             Some(block) => Some(
                 h_flex()
                     .child(div().text_color(warning).child(block_label(block, profile.browser)))
@@ -981,6 +1007,7 @@ impl SwitchHostsApp {
         items: &[Item],
         depth: usize,
         profile: &BrowserProfile,
+        locked: bool,
         out: &mut Vec<AnyElement>,
         cx: &mut Context<Self>,
     ) {
@@ -1003,7 +1030,7 @@ impl SwitchHostsApp {
                     open,
                     active: false,
                     checked,
-                    switch_disabled: false,
+                    switch_disabled: locked,
                 },
                 count,
                 cx.listener(move |this, _, _, cx| {
@@ -1019,7 +1046,7 @@ impl SwitchHostsApp {
             );
             out.push(row.into_any_element());
             if item.kind == ItemKind::Folder && open {
-                self.render_switch_rows(&item.children, depth + 1, profile, out, cx);
+                self.render_switch_rows(&item.children, depth + 1, profile, locked, out, cx);
             }
         }
     }
@@ -1060,10 +1087,20 @@ impl SwitchHostsApp {
     pub(super) fn render_profile_right(&self, profile: &BrowserProfile, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let muted = theme.muted_foreground;
-        let name = self.profile_inputs.as_ref().map(|inputs| Input::new(&inputs.name));
-        let path = self.profile_inputs.as_ref().map(|inputs| Input::new(&inputs.path));
-        let color_controls = self.color_controls(cx);
-        let image_controls = Some(self.image_controls(profile, cx));
+        // A running browser holds the identity it was launched with; editing
+        // the profile now would desync it, so the whole panel is read-only
+        // until it is stopped.
+        let locked = self.profile_running(profile);
+        let name = self
+            .profile_inputs
+            .as_ref()
+            .map(|inputs| Input::new(&inputs.name).disabled(locked));
+        let path = self
+            .profile_inputs
+            .as_ref()
+            .map(|inputs| Input::new(&inputs.path).disabled(locked));
+        let color_controls = self.color_controls(locked, cx);
+        let image_controls = Some(self.image_controls(profile, locked, cx));
 
         let browser_view = cx.entity();
         let browser_menu = Button::new("profile-browser")
@@ -1071,6 +1108,7 @@ impl SwitchHostsApp {
             .small()
             .w_full()
             .label(profile.browser.name())
+            .disabled(locked)
             .cursor_pointer()
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, cx| {
                 let current = browser_view.read(cx).selected_profile().map(|p| p.browser);
@@ -1089,6 +1127,7 @@ impl SwitchHostsApp {
         let mode_view = cx.entity();
         let radios = RadioGroup::vertical("profile-mode")
             .selected_index(MODES.iter().position(|m| *m == profile.mode))
+            .disabled(locked)
             .children(
                 MODES.map(|mode| {
                     Radio::new(ElementId::Name(format!("profile-mode-{mode:?}").into()))
@@ -1119,6 +1158,7 @@ impl SwitchHostsApp {
                                 .small()
                                 .icon(IconName::FolderOpen)
                                 .tooltip(t!("choose_path"))
+                                .disabled(locked)
                                 .cursor_pointer()
                                 .on_click(cx.listener(|this, _, _, cx| this.choose_profile_path(cx))),
                         ),
@@ -1143,9 +1183,10 @@ impl SwitchHostsApp {
                 Button::new("profile-delete")
                     .ghost()
                     .small()
-                    .text_color(theme.danger)
+                    .when(!locked, |this| this.text_color(theme.danger))
                     .icon(IconName::Trash)
                     .label(t!("move_to_trash"))
+                    .disabled(locked)
                     .cursor_pointer()
                     .on_click(cx.listener({
                         let id = profile.id.clone();

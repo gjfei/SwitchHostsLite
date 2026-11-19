@@ -419,10 +419,6 @@ profile_running:
   zh-CN: "运行中"
   zh-TW: "執行中"
   en: "Running"
-block_no_mappings:
-  zh-CN: "没有可用的规则，请先打开一些 hosts 条目"
-  zh-TW: "沒有可用的規則，請先開啟一些 hosts 項目"
-  en: "No rules; turn on some hosts items first"
 block_browser_missing:
   zh-CN: "未找到 %{name}，请填写启动路径"
   zh-TW: "找不到 %{name}，請填寫啟動路徑"
@@ -431,10 +427,6 @@ block_too_long:
   zh-CN: "规则过多，命令超过 %{limit} 个字符"
   zh-TW: "規則過多，命令超過 %{limit} 個字元"
   en: "Too many rules; the command exceeds %{limit} characters"
-block_running:
-  zh-CN: "%{name} 正在运行；新的规则要等它完全退出后才会生效"
-  zh-TW: "%{name} 正在執行；新的規則要等它完全結束後才會生效"
-  en: "%{name} is running; the new rules apply only after it is quit completely"
 duplicate_profile:
   zh-CN: "复制方案"
   zh-TW: "複製方案"

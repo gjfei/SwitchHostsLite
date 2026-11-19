@@ -482,27 +482,20 @@ fn user_data_arg(profile: &BrowserProfile, data_dir: &Path, tmp: &Path) -> Optio
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Block {
-    NoMappings,
     Missing,
     TooLong,
-    Running,
 }
 
-/// Why launching is refused, in priority order. `running` says whether the
-/// profile's browser is open: any instance for `Default`, this profile's own
-/// instance for the other modes.
-pub fn block_reason(profile: &BrowserProfile, maps: usize, cmd_len: usize, running: bool) -> Option<Block> {
-    if maps == 0 {
-        return Some(Block::NoMappings);
-    }
+/// Why launching is refused: a missing browser executable or an over-long
+/// command. An empty rule set is not a block, and neither is a running
+/// browser — while running the UI offers Stop instead of Launch, and the
+/// launch task re-probes and refuses with `err_browser_running`.
+pub fn block_reason(profile: &BrowserProfile, cmd_len: usize) -> Option<Block> {
     if profile.executable().is_none() {
         return Some(Block::Missing);
     }
     if cmd_len > cmd_limit() {
         return Some(Block::TooLong);
-    }
-    if running {
-        return Some(Block::Running);
     }
     None
 }
@@ -589,6 +582,11 @@ fn command_lines() -> Vec<String> {
     }
 }
 
+/// How long the Windows stop waits for the browser to exit gracefully after
+/// `WM_CLOSE` before force-killing it. Chrome normally exits within a second.
+#[cfg(windows)]
+const STOP_GRACE: Duration = Duration::from_secs(3);
+
 /// Stop the profile's browser: its own instance, or for `Default` the everyday
 /// one, which has no `--user-data-dir` to match.
 /// `launched_pid` is the process this app started, used on Windows, which
@@ -621,19 +619,35 @@ pub fn stop(profile: &BrowserProfile, data_dir: &Path, tmp: &Path, launched_pid:
                 .is_ok_and(|status| status.success())
         })
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
     {
         let _ = (profile, data_dir, tmp);
         let Some(pid) = launched_pid else {
             return false;
         };
+        // Close the browser's windows first so it shuts down gracefully and
+        // flushes Preferences, which the exit read-back reads. taskkill /T
+        // cannot do this: it refuses to terminate the parent while Chrome's
+        // windowless children (GPU/utility/renderer) still run, so it never
+        // even posts WM_CLOSE to the main window. /F mops up whatever lingers
+        // past the grace period.
+        if crate::windows::close_browser_windows(pid) > 0
+            && crate::windows::wait_for_exit(pid, STOP_GRACE)
+        {
+            return true;
+        }
         Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T"])
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|status| status.success())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = (profile, data_dir, tmp, launched_pid);
+        false
     }
 }
 
@@ -960,18 +974,14 @@ mod tests {
     fn block_reason_priority() {
         let mut profile = BrowserProfile::new("p");
         profile.path = "/bin/true".into();
-        assert_eq!(block_reason(&profile, 0, 10, false), Some(Block::NoMappings));
-        assert_eq!(block_reason(&profile, 1, cmd_limit() + 1, false), Some(Block::TooLong));
-        assert_eq!(block_reason(&profile, 1, 10, true), Some(Block::Running));
-        assert_eq!(block_reason(&profile, 1, 10, false), None);
-        profile.mode = ProfileMode::Default;
-        assert_eq!(block_reason(&profile, 1, 10, true), Some(Block::Running));
+        assert_eq!(block_reason(&profile, 10), None);
+        assert_eq!(block_reason(&profile, cmd_limit() + 1), Some(Block::TooLong));
         profile.path = String::new();
         profile.browser = BrowserKind::Edge;
         if BrowserKind::Edge.detected_path().is_none() {
-            assert_eq!(block_reason(&profile, 1, 10, false), Some(Block::Missing));
+            assert_eq!(block_reason(&profile, 10), Some(Block::Missing));
             profile.path = "/opt/edge".into();
-            assert_eq!(block_reason(&profile, 1, 10, false), None);
+            assert_eq!(block_reason(&profile, 10), None);
         }
     }
 
