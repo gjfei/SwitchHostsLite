@@ -331,6 +331,7 @@ impl SwitchHostsApp {
             if let Some(name) = name
                 && let Some(last) = profile.last_synced_name.clone()
                 && last != name
+                && profile.name != name
             {
                 profile.push_rev(RevKind::Name);
                 profile.name = name.clone();
@@ -340,6 +341,7 @@ impl SwitchHostsApp {
             if let Some(color) = color
                 && let Some(last) = profile.last_synced_color
                 && last != color
+                && profile.tile_color != Some(color)
             {
                 profile.push_rev(RevKind::Color);
                 profile.tile_color = Some(color);
