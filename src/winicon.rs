@@ -142,22 +142,66 @@ fn icon_resource(exe: &Path) -> Option<Vec<u8>> {
     }
 }
 
-/// The best entry of the lowest-numbered icon group: largest area, then bit
-/// depth, so a 256 px PNG wins over the 16 px one.
+/// An icon group's name. Chromium browsers name their groups (`IDR_MAINFRAME`,
+/// and the document and incognito icons beside it); other executables number
+/// them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GroupKey {
+    Numeric(u16),
+    /// NUL-terminated UTF-16, as the resource directory stores it.
+    Named(Vec<u16>),
+}
+
+impl GroupKey {
+    fn pointer(&self) -> windows_sys::core::PCWSTR {
+        match self {
+            Self::Numeric(id) => *id as usize as *const u16,
+            Self::Named(name) => name.as_ptr(),
+        }
+    }
+}
+
+/// The group Explorer draws the executable with: Chromium's main group, else
+/// the lowest-numbered one, else the first named one.
+fn pick_group(ids: &[GroupKey]) -> Option<&GroupKey> {
+    if let Some(main) = ids
+        .iter()
+        .find(|id| matches!(id, GroupKey::Named(name) if named_is(name, "IDR_MAINFRAME")))
+    {
+        return Some(main);
+    }
+    ids.iter()
+        .filter_map(|id| match id {
+            GroupKey::Numeric(number) => Some((number, id)),
+            GroupKey::Named(_) => None,
+        })
+        .min_by_key(|(number, _)| **number)
+        .map(|(_, id)| id)
+        .or_else(|| ids.first())
+}
+
+/// Whether the NUL-terminated resource name equals `text` (ASCII, exact case).
+fn named_is(name: &[u16], text: &str) -> bool {
+    let mut units = name.iter().copied();
+    text.bytes().all(|byte| units.next() == Some(u16::from(byte))) && units.next() == Some(0)
+}
+
+/// The best entry of [`pick_group`]'s group: largest area, then bit depth, so
+/// a 256 px PNG wins over the 16 px one.
 unsafe fn icon_group_entry(module: HMODULE) -> Option<Vec<u8>> {
-    let mut ids: Vec<u16> = Vec::new();
+    let mut ids: Vec<GroupKey> = Vec::new();
     // SAFETY: the callback only writes to the `Vec` passed through `lparam`.
     unsafe {
         EnumResourceNamesW(
             module,
             RT_GROUP_ICON,
             Some(collect_group_id),
-            &mut ids as *mut Vec<u16> as isize,
+            &mut ids as *mut Vec<GroupKey> as isize,
         );
     }
-    let group_id = ids.into_iter().min()?;
+    let group_key = pick_group(&ids)?;
 
-    let group = unsafe { resource(module, group_id, RT_GROUP_ICON) }?;
+    let group = unsafe { resource(module, group_key.pointer(), RT_GROUP_ICON) }?;
     if group.len() < 6 {
         return None;
     }
@@ -180,7 +224,7 @@ unsafe fn icon_group_entry(module: HMODULE) -> Option<Vec<u8>> {
         }
     }
     let (_, depth, width, height, id) = best?;
-    let data = unsafe { resource(module, id, RT_ICON) }?;
+    let data = unsafe { resource(module, id as usize as *const u16, RT_ICON) }?;
     // The ICO header needs the real geometry; a PNG entry ignores the wrapper,
     // but a DIB entry is sized from it.
     Some(if data.starts_with(&[0x89, b'P', b'N', b'G']) {
@@ -190,29 +234,46 @@ unsafe fn icon_group_entry(module: HMODULE) -> Option<Vec<u8>> {
     })
 }
 
-/// `EnumResourceNamesW` callback: keep the integer ids, which are the ones an
-/// icon group can be found by.
+/// `EnumResourceNamesW` callback: keep every group name, numeric or string.
 unsafe extern "system" fn collect_group_id(
     _module: HMODULE,
     _kind: windows_sys::core::PCWSTR,
     name: windows_sys::core::PCWSTR,
     lparam: isize,
 ) -> BOOL {
-    let ids = unsafe { &mut *(lparam as *mut Vec<u16>) };
+    let ids = unsafe { &mut *(lparam as *mut Vec<GroupKey>) };
     let value = name as usize;
     // String-named resources carry a pointer above the 16-bit range.
     if value >> 16 == 0 {
-        ids.push(value as u16);
+        ids.push(GroupKey::Numeric(value as u16));
+    } else {
+        let mut text = Vec::new();
+        let mut at = 0;
+        loop {
+            // SAFETY: the name is NUL-terminated and mapped with the module.
+            let unit = unsafe { *name.add(at) };
+            text.push(unit);
+            if unit == 0 {
+                break;
+            }
+            at += 1;
+        }
+        ids.push(GroupKey::Named(text));
     }
     1
 }
 
 /// Copy a resource's bytes out of the mapped module.
-unsafe fn resource(module: HMODULE, id: u16, kind: windows_sys::core::PCWSTR) -> Option<Vec<u8>> {
-    // SAFETY: `id` is passed as a MAKEINTRESOURCE-style integer, and the handle
-    // is only locked for the duration of the copy.
+unsafe fn resource(
+    module: HMODULE,
+    name: windows_sys::core::PCWSTR,
+    kind: windows_sys::core::PCWSTR,
+) -> Option<Vec<u8>> {
+    // SAFETY: `name` is either a MAKEINTRESOURCE-style integer or a pointer to
+    // a name that outlives the call, and the handle is only locked for the
+    // duration of the copy.
     unsafe {
-        let found = FindResourceW(module, id as usize as *const u16, kind);
+        let found = FindResourceW(module, name, kind);
         if found.is_null() {
             return None;
         }
@@ -405,6 +466,35 @@ fn glyph(letter: char) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn named(text: &str) -> GroupKey {
+        GroupKey::Named(text.encode_utf16().chain(Some(0)).collect())
+    }
+
+    #[test]
+    fn picks_the_chromium_main_group_first() {
+        let ids = [
+            named("IDR_MAINFRAME_2"),
+            named("IDR_MAINFRAME"),
+            GroupKey::Numeric(1),
+        ];
+        assert_eq!(pick_group(&ids), Some(&named("IDR_MAINFRAME")));
+    }
+
+    #[test]
+    fn falls_back_to_the_lowest_number_then_the_first_group() {
+        let numeric = [
+            GroupKey::Numeric(5),
+            GroupKey::Numeric(2),
+            named("OTHER"),
+        ];
+        assert_eq!(pick_group(&numeric), Some(&GroupKey::Numeric(2)));
+        let unnamed = [named("BETA"), named("ALPHA")];
+        assert_eq!(pick_group(&unnamed), Some(&named("BETA")));
+        assert_eq!(pick_group(&[]), None);
+    }
+
     #[test]
     fn ico_header_describes_one_entry() {
         let wrapped = super::ico(&[1, 2, 3, 4], 32, 32, 32);

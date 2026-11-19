@@ -1,5 +1,6 @@
-//! Windows platform glue: an image-only file picker, and the best-effort
-//! hand-off of the composed picture to the browser window's icon.
+//! Windows platform glue: an image-only file picker, the best-effort hand-off
+//! of the composed picture to the browser window's icon, and the graceful
+//! window close used to stop a profile.
 //!
 //! gpui's own path prompt cannot filter by file type, so the picker here is a
 //! `GetOpenFileNameW` dialog with an image filter, run on its own thread
@@ -13,16 +14,18 @@ use std::time::Duration;
 
 use rust_i18n::t;
 use windows_sys::core::BOOL;
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, WAIT_OBJECT_0};
 use windows_sys::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize,
 };
+use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
 use windows_sys::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIconFromResourceEx, DestroyIcon, EnumWindows, GetClassNameW, GetForegroundWindow,
-    GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IsWindowVisible, SendMessageW, WM_SETICON,
+    GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IsWindowVisible, PostMessageW, SendMessageW,
+    WM_CLOSE, WM_SETICON,
 };
 
 /// Windows caps `lpstrFile` at `MAX_PATH` for this dialog.
@@ -158,4 +161,62 @@ unsafe extern "system" fn apply_icon(window: HWND, lparam: LPARAM) -> BOOL {
     }
     target.set = true;
     0
+}
+
+/// Ask the process's browser windows to close, so Chrome shuts down gracefully
+/// and flushes `Preferences` (the exit read-back depends on it). Returns how
+/// many windows were asked to close; 0 means there was nothing to close.
+pub fn close_browser_windows(pid: u32) -> usize {
+    let mut target = CloseTarget { pid, closed: 0 };
+    // SAFETY: the enumeration context lives until `EnumWindows` returns.
+    unsafe {
+        EnumWindows(Some(close_window), &mut target as *mut CloseTarget as LPARAM);
+    }
+    target.closed
+}
+
+struct CloseTarget {
+    pid: u32,
+    closed: usize,
+}
+
+/// `EnumWindows` callback: post `WM_CLOSE` to each visible browser window of
+/// the process. Unlike the icon hand-off it keeps enumerating, because a
+/// profile may have several windows and Chrome exits only once all close.
+unsafe extern "system" fn close_window(window: HWND, lparam: LPARAM) -> BOOL {
+    let target = unsafe { &mut *(lparam as *mut CloseTarget) };
+    let mut pid = 0u32;
+    // SAFETY: both calls only read the window and write the locals above.
+    unsafe {
+        GetWindowThreadProcessId(window, &mut pid);
+        if pid != target.pid || IsWindowVisible(window) == 0 {
+            return 1;
+        }
+        let mut class = [0u16; 64];
+        let length = GetClassNameW(window, class.as_mut_ptr(), class.len() as i32);
+        if length <= 0 {
+            return 1;
+        }
+        if !String::from_utf16_lossy(&class[..length as usize]).starts_with("Chrome_WidgetWin") {
+            return 1;
+        }
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    }
+    target.closed += 1;
+    1
+}
+
+/// Wait up to `timeout` for the process to exit, reporting whether it did.
+/// A synchronize-only handle is enough to wait on it and is closed afterwards.
+pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
+    // SAFETY: the handle is opened for this pid, waited on once, then closed.
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let waited = WaitForSingleObject(handle, timeout.as_millis() as u32);
+        CloseHandle(handle);
+        waited == WAIT_OBJECT_0
+    }
 }
