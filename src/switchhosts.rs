@@ -252,6 +252,8 @@ fn parse_profiles(value: &Value, ids: &HashMap<String, String>) -> Option<Vec<Br
                 profile.collapsed = profile.collapsed.iter().filter_map(|id| ids.get(id).cloned()).collect();
                 profile.custom_image = false;
                 profile.revs.clear();
+                profile.last_synced_name = None;
+                profile.last_synced_color = None;
                 profile
             })
             .collect(),
@@ -291,6 +293,8 @@ pub fn export_v4(store: &Store) -> Value {
             let mut clean = profile.clone();
             clean.revs.clear();
             clean.custom_image = false;
+            clean.last_synced_name = None;
+            clean.last_synced_color = None;
             serde_json::to_value(&clean).unwrap_or_default()
         })
         .collect();

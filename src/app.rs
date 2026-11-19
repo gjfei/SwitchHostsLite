@@ -885,7 +885,7 @@ impl SwitchHostsApp {
                     }
                     #[cfg(any(target_os = "macos", windows))]
                     if let (Some(color), Some(udd)) = (mark, browser::user_data_dir(&profile, &data_dir, &tmp)) {
-                        let _ = browser::seed_prefs(&profile, color, &udd);
+                        let _ = browser::sync_prefs(&profile, color, &udd);
                     }
                     let (child, mut pipe) = browser::spawn(&profile, &maps, &data_dir, &tmp, mark)
                         .map_err(|err| crate::i18n::LocalizedError::new("err_launch_browser").detail(err))?;
@@ -919,6 +919,16 @@ impl SwitchHostsApp {
                             cx,
                         );
                         this.launched.insert(profile.id.clone(), child.id());
+                        // Remember what was pushed, so the exit read-back can
+                        // tell a browser-side edit from the app's own.
+                        #[cfg(any(target_os = "macos", windows))]
+                        if let Some(color) = mark {
+                            if let Some(p) = this.store.profile_mut(&profile.id) {
+                                p.last_synced_name = Some(profile.name.clone());
+                                p.last_synced_color = Some(color);
+                            }
+                            this.persist(cx);
+                        }
                         this.refresh_running(cx);
                     }
                     Err(err) => Self::notify_error(window, error_text(err), cx),
@@ -929,19 +939,37 @@ impl SwitchHostsApp {
             // Wait for the browser itself, so the running mark clears on exit
             // and an ephemeral profile's directory is removed afterwards.
             if let Ok((profile, mut child, cleanup, pipe)) = result {
-                let id = profile.id;
-                cx.background_executor()
+                let id = profile.id.clone();
+                let independent = profile.mode == browser::ProfileMode::Independent;
+                let identity = cx
+                    .background_executor()
                     .spawn(async move {
                         // Chrome quits when the debugging pipe reaches EOF.
                         let _pipe = pipe;
                         let _ = child.wait();
+                        // Read back the identity the browser now holds, so a
+                        // rename or recolor done inside it can be adopted. Only
+                        // an independent profile keeps a directory to read; an
+                        // ephemeral one is removed below.
+                        let identity = if independent {
+                            browser::user_data_dir(&profile, &store::data_dir(), &std::env::temp_dir())
+                                .map(|dir| browser::read_identity(&dir))
+                                .unwrap_or((None, None))
+                        } else {
+                            (None, None)
+                        };
                         if let Some(dir) = cleanup {
                             let _ = std::fs::remove_dir_all(dir);
                         }
+                        identity
                     })
                     .await;
-                this.update_in(cx, |this, _, cx| {
+                this.update_in(cx, |this, window, cx| {
                     this.launched.remove(&id);
+                    let (name, color) = identity;
+                    if name.is_some() || color.is_some() {
+                        this.adopt_browser_identity(window, &id, name, color, cx);
+                    }
                     this.refresh_running(cx);
                     cx.notify();
                 })

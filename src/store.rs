@@ -345,6 +345,8 @@ impl Store {
         let mut copy = self.profiles[ix].clone();
         copy.id = new_id();
         copy.revs.clear();
+        copy.last_synced_name = None;
+        copy.last_synced_color = None;
         let new_id = copy.id.clone();
         if copy.custom_image
             && std::fs::copy(crate::tile::image_path(id), crate::tile::image_path(&new_id)).is_err()

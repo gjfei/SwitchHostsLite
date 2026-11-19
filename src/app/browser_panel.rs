@@ -312,6 +312,53 @@ impl SwitchHostsApp {
         crate::tile::invalidate_preview(&profile.id, cx);
     }
 
+    /// Adopt a name or color the user changed inside the browser, read back on
+    /// exit. A field is taken only when it differs from what the last launch
+    /// pushed (`last_synced_*`), so edits the app made while the browser ran
+    /// are kept; each adoption is its own undoable revision. The tile and, when
+    /// this profile is the selected one, the open input fields follow.
+    pub(super) fn adopt_browser_identity(
+        &mut self,
+        window: &mut Window,
+        id: &str,
+        name: Option<String>,
+        color: Option<[u8; 3]>,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = self.selected_profile().is_some_and(|p| p.id == id);
+        let mut changed = false;
+        if let Some(profile) = self.store.profile_mut(id) {
+            if let Some(name) = name
+                && let Some(last) = profile.last_synced_name.clone()
+                && last != name
+            {
+                profile.push_rev(RevKind::Name);
+                profile.name = name.clone();
+                profile.last_synced_name = Some(name);
+                changed = true;
+            }
+            if let Some(color) = color
+                && let Some(last) = profile.last_synced_color
+                && last != color
+            {
+                profile.push_rev(RevKind::Color);
+                profile.tile_color = Some(color);
+                profile.last_synced_color = Some(color);
+                changed = true;
+            }
+            if changed {
+                crate::tile::refresh(profile);
+            }
+        }
+        if changed {
+            crate::tile::invalidate_preview(id, cx);
+            if selected {
+                self.refresh_profile_inputs(window, cx);
+            }
+            self.persist(cx);
+        }
+    }
+
     /// Pick the browser executable; a macOS `.app` bundle resolves to the
     /// executable inside it, which is what `path` stores.
     fn choose_profile_path(&mut self, cx: &mut Context<Self>) {
