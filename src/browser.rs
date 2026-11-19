@@ -386,9 +386,9 @@ fn rules_value(maps: &[(String, String)]) -> String {
 }
 
 /// The mark color to apply at launch: personalization colors only mark own
-/// instances, never the everyday browser, and the settings switch gates all.
-pub fn mark_color(profile: &BrowserProfile, enabled: bool) -> Option<[u8; 3]> {
-    if enabled && profile.mode != ProfileMode::Default {
+/// instances, never the everyday browser.
+pub fn mark_color(profile: &BrowserProfile) -> Option<[u8; 3]> {
+    if profile.mode != ProfileMode::Default {
         profile.tile_color
     } else {
         None
@@ -1052,16 +1052,15 @@ mod tests {
     }
 
     #[test]
-    fn mark_color_gates_mode_and_settings() {
+    fn mark_color_gates_mode() {
         let mut profile = BrowserProfile::new("p");
         profile.tile_color = Some([1, 2, 3]);
-        assert_eq!(mark_color(&profile, true), Some([1, 2, 3]));
-        assert_eq!(mark_color(&profile, false), None);
+        assert_eq!(mark_color(&profile), Some([1, 2, 3]));
         profile.mode = ProfileMode::Default;
-        assert_eq!(mark_color(&profile, true), None);
+        assert_eq!(mark_color(&profile), None);
         profile.tile_color = None;
         profile.mode = ProfileMode::Independent;
-        assert_eq!(mark_color(&profile, true), None);
+        assert_eq!(mark_color(&profile), None);
     }
 
     #[test]

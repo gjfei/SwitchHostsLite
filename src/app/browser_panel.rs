@@ -20,7 +20,6 @@ use super::right_panel::{field, heading};
 use super::tree_row::{self, RowState, no_drag};
 use super::{Selection, SwitchHostsApp, display_title};
 use crate::browser::{self, BrowserKind, BrowserProfile, ProfileMode, ProfileSnapshot, RevKind};
-use crate::settings::Settings;
 use crate::store::{self, Item, ItemKind, TrashedProfile};
 
 const MODES: [ProfileMode; 3] = [ProfileMode::Independent, ProfileMode::Ephemeral, ProfileMode::Default];
@@ -460,9 +459,9 @@ impl SwitchHostsApp {
                 }
             }))
             .child(attachment)
-            // The scrim exists only while the pointer is on the target: a dim
-            // wash over the picture with the edit button, so nothing invisible
-            // can take a click.
+            // The scrim and its pencil appear together on hover. The pencil is
+            // a plain icon, not a ghost Button, so it paints with the scrim
+            // instead of waiting for the pointer to reach the middle.
             .when(hovered, |this| {
                 this.child(
                     div()
@@ -473,28 +472,28 @@ impl SwitchHostsApp {
                         .justify_center()
                         .rounded(px(10.))
                         .bg(gpui_kit::black().opacity(0.55))
-                        // A ghost `Button` has no padding and its content is
-                        // `size_full`, so it has no intrinsic width. The fixed
-                        // 20px slot gives it a box to fill.
                         .child(
-                            div().size(px(20.)).flex().items_center().justify_center().child(
-                                Button::new("profile-icon-replace")
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(IconName::PencilLine)
-                                    .tooltip(t!("choose_image"))
-                                    .cursor_pointer()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.choose_profile_image(cx)
-                                    })),
-                            ),
+                            div()
+                                .id("profile-icon-replace")
+                                .size(px(20.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .child(
+                                    Icon::new(IconName::PencilLine)
+                                        .with_size(px(14.))
+                                        .text_color(gpui_kit::white()),
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.choose_profile_image(cx)
+                                })),
                         ),
                 )
             })
-            // A custom picture is cleared from the tile's corner, so the way
-            // back to the app icon is visible without hovering. Painted after
-            // the scrim, so it stays on top and takes the click.
-            .when(profile.custom_image, |this| {
+            // The clear cross shows only on hover too, painted after the scrim
+            // so it stays on top and takes the click.
+            .when(hovered && profile.custom_image, |this| {
                 this.child(
                     div()
                         .id("profile-icon-clear")
@@ -616,8 +615,8 @@ impl SwitchHostsApp {
     }
 
     /// Why `profile` cannot launch, given the mappings it would use.
-    pub(super) fn block_for(&self, profile: &BrowserProfile, maps: &[(String, String)], cx: &App) -> Option<browser::Block> {
-        let mark = browser::mark_color(profile, Settings::global(cx).mark_launched);
+    pub(super) fn block_for(&self, profile: &BrowserProfile, maps: &[(String, String)]) -> Option<browser::Block> {
+        let mark = browser::mark_color(profile);
         let cmd = browser::build_cmd(profile, maps, &store::data_dir(), &std::env::temp_dir(), mark);
         let running = self.profile_running(profile);
         browser::block_reason(profile, maps.len(), cmd.len(), running)
@@ -674,7 +673,7 @@ impl SwitchHostsApp {
         let id = profile.id.clone();
         let active = self.selected == Selection::Browser(Some(id.clone()));
         let maps = browser::mappings(&self.store.switched_content(&profile.switches));
-        let blocked = self.block_for(profile, &maps, cx);
+        let blocked = self.block_for(profile, &maps);
         let launchable = blocked.is_none() && !self.launching;
         let running = self.profile_running(profile);
         let stoppable = self.profile_stoppable(profile);
@@ -786,7 +785,7 @@ impl SwitchHostsApp {
                 .profile(&id)
                 .and_then(|profile| {
                     let maps = browser::mappings(&this.store.switched_content(&profile.switches));
-                    this.block_for(profile, &maps, cx)
+                    this.block_for(profile, &maps)
                 })
                 .is_some();
             let launch_item = menu_entry(&view, t!("launch"), {
@@ -802,14 +801,9 @@ impl SwitchHostsApp {
             } else {
                 launch_item
             };
-            let copy_id = id.clone();
             let dup_id = id.clone();
             let delete_id = id.clone();
             menu.item(action_item)
-                .item(menu_entry(&view, t!("copy_command"), move |this, window, cx| {
-                    this.select(Selection::Browser(Some(copy_id.clone())), window, cx);
-                    this.copy_command(window, cx);
-                }))
                 .separator()
                 .item(menu_entry(&view, t!("duplicate_profile"), move |this, window, cx| {
                     this.duplicate_profile(dup_id.clone(), window, cx)
@@ -890,7 +884,7 @@ impl SwitchHostsApp {
                 .into_any_element()
         };
         let maps = browser::mappings(&self.store.switched_content(&profile.switches));
-        let status = match self.block_for(profile, &maps, cx) {
+        let status = match self.block_for(profile, &maps) {
             // The count on the left already says there are no mappings, so the
             // reason is not repeated on the right.
             Some(browser::Block::NoMappings) => None,

@@ -165,7 +165,7 @@ impl SwitchHostsApp {
                                     .on_click(cx.listener(|this, _, window, cx| this.stop_profile(window, cx))),
                             ));
                         }
-                        let blocked = self.profile_block(cx);
+                        let blocked = self.profile_block();
                         let launchable = blocked.is_none();
                         let tooltip = match (blocked, self.selected_profile()) {
                             (Some(block), Some(profile)) => block_label(block, profile.browser),
@@ -182,15 +182,6 @@ impl SwitchHostsApp {
                                 .tooltip(tooltip)
                                 .when(launchable, |this| this.cursor_pointer())
                                 .on_click(cx.listener(|this, _, window, cx| this.launch_profile(window, cx))),
-                        ))
-                        .child(no_drag(
-                            Button::new("copy-command")
-                                .ghost()
-                                .small()
-                                .icon(IconName::Copy)
-                                .tooltip(t!("copy_command"))
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _, window, cx| this.copy_command(window, cx))),
                         ))
                     } else {
                         this.child(no_drag(

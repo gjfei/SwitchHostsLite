@@ -79,9 +79,6 @@ pub struct Settings {
     /// Look for a new release at startup, at most once a day.
     #[serde(skip_serializing_if = "is_true")]
     pub check_updates: bool,
-    /// Tint the window and mark the Dock/taskbar of launched browsers.
-    #[serde(skip_serializing_if = "is_true")]
-    pub mark_launched: bool,
     /// Unix time of the last update check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_update_check: Option<i64>,
@@ -107,7 +104,6 @@ impl Default for Settings {
             tree_width: DEFAULT_TREE_WIDTH,
             info_width: DEFAULT_INFO_WIDTH,
             check_updates: true,
-            mark_launched: true,
             last_update_check: None,
         }
     }
@@ -189,14 +185,11 @@ mod tests {
     fn update_settings_default_on_and_round_trip() {
         let old: Settings = serde_json::from_str(r#"{"language":"en"}"#).unwrap();
         assert!(old.check_updates);
-        assert!(old.mark_launched);
         assert_eq!(old.last_update_check, None);
-        let s = Settings { check_updates: false, mark_launched: false, last_update_check: Some(42), ..Default::default() };
+        let s = Settings { check_updates: false, last_update_check: Some(42), ..Default::default() };
         let text = serde_json::to_string(&s).unwrap();
         assert!(text.contains(r#""check_updates":false"#) && text.contains(r#""last_update_check":42"#));
-        assert!(text.contains(r#""mark_launched":false"#));
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
-        assert!(!serde_json::to_string(&Settings::default()).unwrap().contains("mark_launched"));
     }
 
     #[test]

@@ -388,25 +388,13 @@ mode_default_hint:
   zh-TW: "使用 %{name} 目前的設定檔，需要先完全結束瀏覽器。"
   en: "Uses the current %{name} profile; the browser must be fully quit first."
 profile_mappings:
-  zh-CN: "映射规则"
-  zh-TW: "對應規則"
-  en: "Mappings"
+  zh-CN: "规则"
+  zh-TW: "規則"
+  en: "Rules"
 mappings_count:
-  zh-CN: "%{count} 条映射"
-  zh-TW: "%{count} 條對應"
-  en: "%{count} mappings"
-copy_command:
-  zh-CN: "复制命令"
-  zh-TW: "複製命令"
-  en: "Copy Command"
-cmd_copied:
-  zh-CN: "启动命令已复制"
-  zh-TW: "啟動命令已複製"
-  en: "Launch command copied"
-cmd_copy_blocked:
-  zh-CN: "命令过长，无法复制"
-  zh-TW: "命令過長，無法複製"
-  en: "The command is too long to copy"
+  zh-CN: "%{count} 条规则"
+  zh-TW: "%{count} 條規則"
+  en: "%{count} rules"
 launch:
   zh-CN: "启动"
   zh-TW: "啟動"
@@ -432,17 +420,17 @@ profile_running:
   zh-TW: "執行中"
   en: "Running"
 block_no_mappings:
-  zh-CN: "没有可用的映射，请先打开一些 hosts 条目"
-  zh-TW: "沒有可用的對應，請先開啟一些 hosts 項目"
-  en: "No mappings; turn on some hosts items first"
+  zh-CN: "没有可用的规则，请先打开一些 hosts 条目"
+  zh-TW: "沒有可用的規則，請先開啟一些 hosts 項目"
+  en: "No rules; turn on some hosts items first"
 block_browser_missing:
   zh-CN: "未找到 %{name}，请填写启动路径"
   zh-TW: "找不到 %{name}，請填寫啟動路徑"
   en: "%{name} not found; set the executable path"
 block_too_long:
-  zh-CN: "映射过多，命令超过 %{limit} 个字符"
-  zh-TW: "對應過多，命令超過 %{limit} 個字元"
-  en: "Too many mappings; the command exceeds %{limit} characters"
+  zh-CN: "规则过多，命令超过 %{limit} 个字符"
+  zh-TW: "規則過多，命令超過 %{limit} 個字元"
+  en: "Too many rules; the command exceeds %{limit} characters"
 block_running:
   zh-CN: "%{name} 正在运行；新的规则要等它完全退出后才会生效"
   zh-TW: "%{name} 正在執行；新的規則要等它完全結束後才會生效"
@@ -731,10 +719,6 @@ auto_check_updates:
   zh-CN: "自动检查更新"
   zh-TW: "自動檢查更新"
   en: "Automatically check for updates"
-mark_launched:
-  zh-CN: "标记启动的浏览器（窗口色带与系统图标）"
-  zh-TW: "標記啟動的瀏覽器（視窗色帶與系統圖示）"
-  en: "Mark launched browsers (window tint and system icon)"
 update_not_configured:
   zh-CN: "未配置更新源"
   zh-TW: "未設定更新來源"

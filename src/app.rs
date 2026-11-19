@@ -715,17 +715,10 @@ impl SwitchHostsApp {
         })
     }
 
-    fn profile_cmd(&self, cx: &App) -> String {
-        self.selected_profile().map_or_else(String::new, |p| {
-            let mark = browser::mark_color(p, Settings::global(cx).mark_launched);
-            browser::build_cmd(p, &self.profile_maps(), &store::data_dir(), &std::env::temp_dir(), mark)
-        })
-    }
-
-    fn profile_block(&self, cx: &App) -> Option<browser::Block> {
+    fn profile_block(&self) -> Option<browser::Block> {
         let profile = self.selected_profile()?;
         let maps = self.profile_maps();
-        let mark = browser::mark_color(profile, Settings::global(cx).mark_launched);
+        let mark = browser::mark_color(profile);
         let cmd = browser::build_cmd(profile, &maps, &store::data_dir(), &std::env::temp_dir(), mark);
         let running = self.profile_running(profile);
         browser::block_reason(profile, maps.len(), cmd.len(), running)
@@ -865,13 +858,13 @@ impl SwitchHostsApp {
         let Some(profile) = self.selected_profile().cloned() else {
             return;
         };
-        if self.launching || self.profile_block(cx).is_some() {
+        if self.launching || self.profile_block().is_some() {
             return;
         }
         self.launching = true;
         cx.notify();
         let maps = self.profile_maps();
-        let mark = browser::mark_color(&profile, Settings::global(cx).mark_launched);
+        let mark = browser::mark_color(&profile);
         // Composite on the main thread; launching only reads the cached PNG.
         let tile = mark.and_then(|_| tile::ensure(&profile));
         cx.spawn_in(window, async move |this, cx| {
@@ -1006,19 +999,6 @@ impl SwitchHostsApp {
             .ok();
         })
         .detach();
-    }
-
-    fn copy_command(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let cmd = self.profile_cmd(cx);
-        if cmd.is_empty() {
-            return;
-        }
-        if cmd.len() > browser::cmd_limit() {
-            window.push_notification(Notification::error(t!("cmd_copy_blocked")), cx);
-            return;
-        }
-        cx.write_to_clipboard(ClipboardItem::new_string(cmd));
-        window.push_notification(Notification::success(t!("cmd_copied")), cx);
     }
 
     // -- applying ------------------------------------------------------------

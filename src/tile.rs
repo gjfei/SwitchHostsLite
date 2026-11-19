@@ -63,7 +63,7 @@ const NEUTRAL_BADGE: [u8; 3] = [120, 124, 133];
 /// is ignored here exactly as it is for the window mark.
 #[cfg(any(target_os = "macos", windows, test))]
 fn badge_accent(profile: &BrowserProfile) -> [u8; 3] {
-    crate::browser::mark_color(profile, true).unwrap_or(NEUTRAL_BADGE)
+    crate::browser::mark_color(profile).unwrap_or(NEUTRAL_BADGE)
 }
 
 /// The cached picture, compositing it first when missing. `None` where no

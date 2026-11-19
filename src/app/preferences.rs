@@ -220,22 +220,13 @@ impl SwitchHostsApp {
                     Settings::update(cx, |s| s.check_updates = checked);
                 });
 
-            let mark_launched = Checkbox::new("pref-mark-launched")
-                .label(SharedString::from(t!("mark_launched")))
-                .checked(settings.mark_launched)
-                .cursor_pointer()
-                .on_click(|checked: &bool, _, cx| {
-                    let checked = *checked;
-                    Settings::update(cx, |s| s.mark_launched = checked);
-                });
-
             dialog.title(t!("preferences")).w(px(420.)).child(
                 v_flex()
                     .gap_5()
                     .pb_2()
                     .child(section(t!("language"), cx).child(language))
                     .child(section(t!("theme"), cx).child(theme).child(color_themes))
-                    .child(v_flex().gap_3().child(multi_select).child(check_updates).child(mark_launched)),
+                    .child(v_flex().gap_3().child(multi_select).child(check_updates)),
             )
         });
     }
