@@ -65,7 +65,9 @@ impl SwitchHostsApp {
             _ => None,
         };
 
-        TitleBar::new().h(TOP_BAR_HEIGHT).child(
+        // Windows: the bar's first control sits above the 40px icon sidebar,
+        // so 8px padding puts the 24px button's centre on its 20px centre line.
+        TitleBar::new().h(TOP_BAR_HEIGHT).when(cfg!(windows), |this| this.pl(px(8.))).child(
             h_flex()
                 .flex_1()
                 .h_full()
