@@ -470,6 +470,14 @@ pub fn user_data_dir(profile: &BrowserProfile, data_dir: &Path, tmp: &Path) -> O
     }
 }
 
+/// The browser's everyday user-data-dir on Windows: where the singleton window
+/// points when no `--user-data-dir` was passed.
+#[cfg(any(windows, test))]
+fn default_user_data_dir(kind: BrowserKind, local_app_data: &str) -> PathBuf {
+    let (vendor, product) = kind.windows_dirs();
+    Path::new(local_app_data).join(vendor).join(product).join("User Data")
+}
+
 /// The `--user-data-dir` argument that identifies this profile's own browser
 /// instance, if it has one.
 fn user_data_arg(profile: &BrowserProfile, data_dir: &Path, tmp: &Path) -> Option<String> {
@@ -503,17 +511,52 @@ pub fn block_reason(profile: &BrowserProfile, cmd_len: usize) -> Option<Block> {
 /// Whether the browser's everyday instance is open — the one with no
 /// `--user-data-dir`, so instances started for other profiles never count.
 pub fn default_running(kind: BrowserKind) -> bool {
-    command_lines().iter().any(|line| is_default_main(line, kind))
+    #[cfg(target_os = "macos")]
+    {
+        command_lines().iter().any(|line| is_default_main(line, kind))
+    }
+    #[cfg(windows)]
+    {
+        let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        crate::windows::singleton_pid(&default_user_data_dir(kind, &local)).is_some()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = kind;
+        false
+    }
 }
 
 /// Ids of profiles whose own browser instance is running. Instances started
 /// before this app process (or by an earlier session) are found through the
-/// profile's `--user-data-dir` in process command lines; Chromium keeps them
-/// alive independently of the app.
+/// profile's user-data-dir: macOS matches it in process command lines, Windows
+/// probes Chromium's singleton message window.
 pub fn running_profiles(profiles: &[BrowserProfile], data_dir: &Path, tmp: &Path) -> HashSet<String> {
-    matching_profiles(&command_lines(), profiles, data_dir, tmp)
+    #[cfg(target_os = "macos")]
+    {
+        matching_profiles(&command_lines(), profiles, data_dir, tmp)
+    }
+    #[cfg(windows)]
+    {
+        let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        profiles
+            .iter()
+            .filter(|profile| {
+                let udd = user_data_dir(profile, data_dir, tmp)
+                    .unwrap_or_else(|| default_user_data_dir(profile.browser, &local));
+                crate::windows::singleton_pid(&udd).is_some()
+            })
+            .map(|profile| profile.id.clone())
+            .collect()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = (profiles, data_dir, tmp);
+        HashSet::new()
+    }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn matching_profiles(
     lines: &[String],
     profiles: &[BrowserProfile],
@@ -539,6 +582,7 @@ fn matching_profiles(
 
 /// Whether a command line is the browser's everyday process: the executable
 /// itself, without a `--user-data-dir` and without the `--type=` helper marker.
+#[cfg(any(target_os = "macos", test))]
 fn is_default_main(line: &str, kind: BrowserKind) -> bool {
     if line.contains("--user-data-dir") || line.contains("--type=") {
         return false;
@@ -558,28 +602,21 @@ fn is_default_main(line: &str, kind: BrowserKind) -> bool {
     }
 }
 
-/// Command lines of all processes. Windows' `tasklist` cannot show them, so
-/// only the launched set is available there.
+/// Command lines of all processes, used by the macOS detection path.
+#[cfg(target_os = "macos")]
 fn command_lines() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("ps")
-            .args(["-axo", "command"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map(|output| {
-                String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Vec::new()
-    }
+    Command::new("ps")
+        .args(["-axo", "command"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// How long the Windows stop waits for the browser to exit gracefully after
@@ -589,8 +626,8 @@ const STOP_GRACE: Duration = Duration::from_secs(3);
 
 /// Stop the profile's browser: its own instance, or for `Default` the everyday
 /// one, which has no `--user-data-dir` to match.
-/// `launched_pid` is the process this app started, used on Windows, which
-/// cannot list command lines.
+/// `launched_pid` is the process this app started; on Windows the singleton
+/// window finds externally-started instances when it is absent.
 pub fn stop(profile: &BrowserProfile, data_dir: &Path, tmp: &Path, launched_pid: Option<u32>) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -621,8 +658,13 @@ pub fn stop(profile: &BrowserProfile, data_dir: &Path, tmp: &Path, launched_pid:
     }
     #[cfg(windows)]
     {
-        let _ = (profile, data_dir, tmp);
-        let Some(pid) = launched_pid else {
+        let pid = launched_pid.or_else(|| {
+            let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            let udd = user_data_dir(profile, data_dir, tmp)
+                .unwrap_or_else(|| default_user_data_dir(profile.browser, &local));
+            crate::windows::singleton_pid(&udd)
+        });
+        let Some(pid) = pid else {
             return false;
         };
         // Close the browser's windows first so it shuts down gracefully and
@@ -985,8 +1027,6 @@ mod tests {
         }
     }
 
-    // macOS ps lines and bundle paths; Windows cannot list command lines.
-    #[cfg(target_os = "macos")]
     #[test]
     fn running_profiles_match_the_user_data_dir() {
         let mut independent = BrowserProfile::new("a");
@@ -1000,18 +1040,16 @@ mod tests {
         let profiles = [independent, ephemeral, everyday];
         let data = Path::new("/data");
         let tmp = Path::new("/tmp");
-        let lines = vec![
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome \
-             --user-data-dir=/data/browser-profiles/a1 --test-type"
-                .to_string(),
-        ];
+        let arg_a = user_data_arg(&profiles[0], data, tmp).unwrap();
+        let arg_b = user_data_arg(&profiles[1], data, tmp).unwrap();
+        let lines = vec![format!("browser {arg_a} --test-type")];
         assert_eq!(
             matching_profiles(&lines, &profiles, data, tmp),
             HashSet::from(["a1".to_string()])
         );
         let lines = vec![
-            "Chrome --incognito --user-data-dir=/tmp/shl-ephemeral-b1".to_string(),
-            "\"Chrome\" --user-data-dir=\"/data/browser-profiles/a1\"".to_string(),
+            format!("browser --incognito {arg_b}"),
+            format!("\"browser\" {}", arg_a.replacen("--user-data-dir=", "--user-data-dir=\"", 1) + "\""),
         ];
         // The quoted form is the copyable command, not a running process.
         assert_eq!(
@@ -1356,5 +1394,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shl-read-missing-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(read_identity(&dir), (None, None));
+    }
+
+    #[test]
+    fn default_user_data_dir_uses_the_vendor_layout() {
+        let local = r"C:\Users\test\AppData\Local";
+        // Path::join uses the host's separator, so normalize before comparing
+        // the Windows layout (this test runs on macOS too).
+        let chrome = default_user_data_dir(BrowserKind::Chrome, local).to_string_lossy().replace('\\', "/");
+        assert_eq!(chrome, "C:/Users/test/AppData/Local/Google/Chrome/User Data");
+        let edge = default_user_data_dir(BrowserKind::Edge, local).to_string_lossy().replace('\\', "/");
+        assert_eq!(edge, "C:/Users/test/AppData/Local/Microsoft/Edge/User Data");
     }
 }

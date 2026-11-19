@@ -9,6 +9,7 @@
 //! appears and simply ignored when the browser repaints over it.
 
 use std::ffi::c_void;
+use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -23,9 +24,9 @@ use windows_sys::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateIconFromResourceEx, DestroyIcon, EnumWindows, GetClassNameW, GetForegroundWindow,
-    GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IsWindowVisible, PostMessageW, SendMessageW,
-    WM_CLOSE, WM_SETICON,
+    CreateIconFromResourceEx, DestroyIcon, EnumWindows, FindWindowExW, FindWindowW, GetClassNameW,
+    GetForegroundWindow, GetWindowThreadProcessId, HWND_MESSAGE, ICON_BIG, ICON_SMALL,
+    IsWindowVisible, PostMessageW, SendMessageW, WM_CLOSE, WM_SETICON,
 };
 
 /// Windows caps `lpstrFile` at `MAX_PATH` for this dialog.
@@ -218,5 +219,33 @@ pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
         let waited = WaitForSingleObject(handle, timeout.as_millis() as u32);
         CloseHandle(handle);
         waited == WAIT_OBJECT_0
+    }
+}
+
+/// The pid of the Chromium instance owning `user_data_dir`, found through its
+/// singleton message window (class `Chrome_MessageWindow`, title = the path).
+/// `None` when no instance runs with that directory. Works for any starter,
+/// including browsers opened before this app or in an earlier session.
+pub fn singleton_pid(user_data_dir: &Path) -> Option<u32> {
+    let class: Vec<u16> = "Chrome_MessageWindow".encode_utf16().chain(Some(0)).collect();
+    let title: Vec<u16> = user_data_dir.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: both wide strings are NUL-terminated and outlive the call; the
+    // window handle is only read for its owning pid.
+    unsafe {
+        // Chromium creates the singleton as a message-only window and probes
+        // it with FindWindowEx(HWND_MESSAGE, …); older builds used a hidden
+        // top-level window, which FindWindowW still covers.
+        let window = FindWindowExW(HWND_MESSAGE, std::ptr::null_mut(), class.as_ptr(), title.as_ptr());
+        let window = if window.is_null() {
+            FindWindowW(class.as_ptr(), title.as_ptr())
+        } else {
+            window
+        };
+        if window.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, &mut pid);
+        (pid != 0).then_some(pid)
     }
 }
