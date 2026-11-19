@@ -455,7 +455,7 @@ fn theme_value(color: [u8; 3]) -> String {
 }
 
 /// The profile's own `--user-data-dir`, if it has one.
-#[cfg(any(windows, test))]
+#[cfg(any(target_os = "macos", windows, test))]
 pub fn user_data_dir(profile: &BrowserProfile, data_dir: &Path, tmp: &Path) -> Option<PathBuf> {
     match profile.mode {
         ProfileMode::Independent => Some(profile_dir(profile, data_dir)),
@@ -698,7 +698,7 @@ pub fn spawn(
 /// Pre-seed the profile identity Chrome shows in its avatar button and, on
 /// Windows, in the taskbar badge. Only written when the profile has no prefs
 /// yet, so edits made inside the browser survive.
-#[cfg(any(windows, test))]
+#[cfg(any(target_os = "macos", windows, test))]
 pub fn seed_prefs(profile: &BrowserProfile, color: [u8; 3], user_data: &Path) -> std::io::Result<()> {
     let prefs = user_data.join("Default").join("Preferences");
     if prefs.exists() {
@@ -710,7 +710,7 @@ pub fn seed_prefs(profile: &BrowserProfile, color: [u8; 3], user_data: &Path) ->
     fs::write(prefs, prefs_json(profile, color))
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(target_os = "macos", windows, test))]
 fn prefs_json(profile: &BrowserProfile, color: [u8; 3]) -> String {
     let [r, g, b] = color;
     let sk_color = 0xFF00_0000u32 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);

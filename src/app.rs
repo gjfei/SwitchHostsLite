@@ -883,7 +883,7 @@ impl SwitchHostsApp {
                             .arg("name", profile.browser.name())
                             .into());
                     }
-                    #[cfg(windows)]
+                    #[cfg(any(target_os = "macos", windows))]
                     if let (Some(color), Some(udd)) = (mark, browser::user_data_dir(&profile, &data_dir, &tmp)) {
                         let _ = browser::seed_prefs(&profile, color, &udd);
                     }
