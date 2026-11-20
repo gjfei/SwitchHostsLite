@@ -41,32 +41,33 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
 
 ## Features
 
-- **Three kinds of entries**
+- **Four kinds of entries**
   - **Local**: a piece of hosts text you edit yourself.
+  - **Remote**: subscribes to hosts content from an http(s) URL, refreshed manually or on a fixed interval; the content is read-only. See [Remote hosts](#remote-hosts).
   - **Folder**: can be nested. Its choice mode is "default" (follows the top-level single/multiple setting), "single" (only one child enabled at a time) or "multiple". Turning a folder on or off turns its children on or off too.
-  - **Group**: references local entries and combines their content in the chosen order.
+  - **Group**: references entries and combines their content in the chosen order.
 - **Switching applies immediately**: turning an entry on or off writes the system hosts right away. If writing fails (for example, the password prompt was cancelled), the switch reverts.
+- **Tray icon**: closing the window hides the app to the tray (macOS menu bar / Windows notification area) instead of quitting. The tray menu only has "Show Window" and "Quit"; quitting saves pending edits first. On macOS, clicking the Dock icon also brings the window back.
+- **Launch at login**: the Preferences checkbox takes effect immediately (a LaunchAgent on macOS, the current user's Run registry value on Windows). A missing entry or one pointing at an old path is repaired at startup; the Windows uninstaller removes the registry value.
 - **Browser profiles**: without touching the system hosts, each profile turns on the hosts entries it wants in the main panel with its own switches and passes their rules to Chromium as `--host-resolver-rules`, launching Google Chrome or Microsoft Edge with a dedicated or temporary profile. You can also add the rules to your everyday browser profile (quit that browser completely first). Those switches are independent of the system hosts switches.
 - **Read-only system hosts view**: the first row of the list shows the current system hosts. If another program changed the file, it is re-read when the window regains focus.
 - **Your own entries are kept**: the app only maintains the block between `# --- SWITCHHOSTS_LITE_CONTENT_START ---` and `# --- SWITCHHOSTS_LITE_CONTENT_END ---` at the end of the hosts file. Everything outside the block stays untouched.
 - **Trashcan**: deleted entries go to the trashcan first. You can restore them to their original folder (restored entries are switched off), delete them permanently, or empty the trashcan; browser profiles go to the trashcan too and come back with the settings they had.
 - **History**: the clock button in the title bar opens the history sheet. Every successful system hosts write that changes the content records the content before and after it (each skipped when it equals the newest entry; up to 50). Browser profiles record every change of name, browser, launch mode, launch path, profile color, profile icon and switches. Both can be viewed, restored or deleted.
 - **Import / export**
-  - Import SwitchHosts v3 / v4 / v5 backups and the backup format of earlier versions of this app. Importing replaces all current hosts entries; a backup exported by this app also replaces the browser profiles. The replaced content moves to the trashcan.
-  - Export in the SwitchHosts v4 format (`swh_data_<time>.json`), which SwitchHosts v4 and v5 can import. Browser profiles are exported together with the hosts records — settings, switches and color are kept, custom pictures and revision history are not (carried in an extension field SwitchHosts ignores).
+  - Import SwitchHosts v3 / v4 / v5 backups and the backup format of earlier versions of this app. Importing replaces all current hosts entries; a backup exported by this app also replaces the browser profiles. The replaced content moves to the trashcan. Remote entries keep their URL and refresh interval (the content starts as the backup's cache).
+  - Export in the SwitchHosts v4 format (`swh_data_<time>.json`), which SwitchHosts v4 and v5 can import; remote entries are written back as the remote type. Browser profiles are exported together with the hosts records — settings, switches and color are kept, custom pictures and revision history are not (carried in an extension field SwitchHosts ignores).
 - **Syntax highlighting**: comments, IP addresses, and lines whose first field is not a valid IP address (shown in the error color).
 - **Editor shortcuts**: toggle comment, move line up/down, duplicate line, delete line. See [Keyboard shortcuts](#keyboard-shortcuts).
 - **Themes**: follow system / light / dark. 36 bundled color themes (11 light, 25 dark, from gpui-component), chosen separately for light and dark mode, plus your own theme files.
 - **Languages**: Simplified Chinese, Traditional Chinese and English, following the system language by default.
-- **Auto-apply**: while you edit a local entry, its content is written about 1 second after you stop typing. Adding, deleting, moving or editing entries is written right away too. Both kinds of automatic writes **only happen when no password is needed** (the current user can write the hosts file directly). Otherwise the UI shows "Unapplied changes" and waits for you to apply.
-- **Auto-update**: at startup the app looks for a new release on GitHub Releases (at most once a day; can be turned off in Preferences). The download is checked against its size and SHA-256 and installed, then the app restarts. On Windows the installer runs silently and asks for administrator rights; cancelling leaves the current version in place and reopens the app.
+- **Auto-apply**: while you edit a local entry, its content is written about 1 second after you stop typing. Adding, deleting, moving or editing entries is written right away too. When the hosts file needs privileges, authorization is requested: on macOS you enter the password once per app run and later writes are silent; on Windows every write shows a UAC prompt (as in SwitchHosts).
+- **Updates**: at startup the app looks for a new release on GitHub Releases (at most once a day; can be turned off in Preferences). The download is checked against its size and SHA-256, with progress shown in the dialog. Once it finishes, Windows installs silently and restarts only after you click "Restart to Update" (UAC appears; cancelling keeps the current version); macOS first asks for a folder to save into (Downloads by default), then offers "Show in Finder" so you can mount the disk image and drag the app into Applications yourself; if the package is moved or deleted, the update dialog goes back to "Update Now" so you can download it again. Both stable and pre-release builds get update prompts; moving from a stable build to a pre-release asks for confirmation before downloading.
 - **Low resource usage**: native rendering in a single executable, with far lower memory use and download size than the Electron-based SwitchHosts. The caret stops blinking after about 10 seconds of inactivity, so the window is not redrawn continuously for it.
 
 ## Differences from SwitchHosts
 
 - **Browser profiles are new**: SwitchHosts has no such feature. A browser profile turns the rules of the hosts entries it has switched on into launch arguments that only affect the browser process it starts, without writing the system hosts or needing administrator rights.
-- **No remote hosts**: hosts cannot be subscribed from a URL. When a SwitchHosts backup is imported, remote entries become local entries holding the content cached in the backup.
-- **No tray / menu bar icon**. Closing the window quits the app.
 - **No HTTP API, Alfred workflow or other integrations**, and no command-line interface.
 - **Folder switches always sync their children**: this matches SwitchHosts with "Sync Child Items When Toggling Folders" turned on. Turning a folder on or off does the same to everything inside it (stopping at folders in single mode). A parent folder turns on once all of its children are on, and turns off as soon as any child is turned off (folders in single mode don't follow their children). The hosts file gets every entry whose own switch is on; a folder's own switch never hides its children. New entries and folders start switched off. In SwitchHosts this syncing is an option (off by default); here it is always on.
 - **On/off state after import**: as in SwitchHosts, everything imported from a SwitchHosts backup, folders included, is switched off. Export writes every switch and folder choice mode as is; files exported by this app keep those switches and the "Allow multiple top-level items to be enabled" setting when imported again.
@@ -95,14 +96,16 @@ Every release also carries `SHA256SUMS.txt` (checksums of all files) and `latest
   xattr -dr com.apple.quarantine "/Applications/SwitchHosts Lite.app"
   ```
 
-- **Move the app to the Applications folder** before running it. When opened straight from Downloads or the disk image, macOS runs it from a read-only temporary location (App Translocation), and automatic updates cannot work there.
+- **Move the app to the Applications folder** before running it. When opened straight from Downloads or the disk image, macOS runs it from a read-only temporary location (App Translocation).
+- On macOS the in-app updater only downloads: it saves the disk image into the folder you pick (Downloads by default), then "Show in Finder" locates the file for you to mount and drag into Applications over the old copy. If the package is moved or deleted, the update dialog says so and offers "Update Now" to download it again. Packages downloaded by the app carry no quarantine flag, so the replaced app starts directly — no right-click open or xattr needed.
 
 ### Windows
 
 - Run `SwitchHostsLite-<version>-windows-x86_64-setup.exe` (`-windows-aarch64-setup.exe` on ARM64). The installer asks for administrator rights, installs to `C:\Program Files\SwitchHostsLite` by default (the directory can be changed), adds Start Menu and desktop shortcuts for all users, and uninstalls from Settings → Apps.
 - The exe is not code-signed, so SmartScreen may say "Windows protected your PC". Click "More info → Run anyway".
 - Windows Defender occasionally flags the unsigned exe as a trojan; detection names ending in `!ml` are usually machine-learning false positives. Report it via the [Microsoft file submission](https://www.microsoft.com/en-us/wdsi/filesubmission) or temporarily add the app to Defender's exclusions.
-- By default the app is installed under `Program Files`, which ordinary users cannot write to. In-app updates download the installer, run it silently with administrator rights after the app exits, and start the new version (UAC appears; cancelling keeps the current version).
+- By default the app is installed under `Program Files`, which ordinary users cannot write to. Once an in-app update finishes downloading, clicking "Restart to Update" runs the installer silently with administrator rights after the app exits and starts the new version (UAC appears; cancelling keeps the current version).
+- When the installer finds SwitchHosts Lite running, it says so and offers to close it for you: a quit message is posted to the tray window and the app exits normally after saving its settings. You can also close it yourself and retry, or cancel. Older versions without a tray window must be closed by hand. A silent install (`/S`) shows no dialog: it tries the quick close and waits for the exit, aborting on timeout. The uninstaller does the same.
 
 ## Usage
 
@@ -112,8 +115,8 @@ From left to right, the window has:
 
 1. **Icon bar**: Hosts list, browser profiles, trashcan (with a red dot when not empty), and the settings menu (Import, Export, Preferences, Theme, Allow multiple top-level items to be enabled, Check for Updates, About).
 2. **List**: in the hosts view, "System Hosts" first, then your entries; in the browser profiles view, the profile list. The button at the left of the title bar hides the list; while it is hidden, the current entry's switch appears in the title bar.
-3. **Main panel**: shows the selected item. Only local entries are editable. System hosts, folders (showing the combined content of the entries inside that are on) and groups (showing the combined content of their entries) are read-only previews; in the browser profiles view this area shows the profile's hosts tree, with the same switches and interactions as the hosts list. The status bar shows the line count, byte count and whether everything is applied; for a browser profile its left side shows the rule count and its right side the launch state (ready, running, or the reason launching is blocked).
-4. **Info panel**: toggled by the button at the right of the title bar. It shows the type, rule count (lines that are neither blank nor comments), a folder's choice mode and child count, a group's entries, a browser profile's settings, and the path of the system hosts.
+3. **Main panel**: shows the selected item. Only local entries are editable. System hosts, remote entries, folders (showing the combined content of the entries inside that are on) and groups (showing the combined content of their entries) are read-only previews; in the browser profiles view this area shows the profile's hosts tree, with the same switches and interactions as the hosts list. The status bar shows the line count and byte count; for a browser profile its left side shows the rule count and its right side the launch state (ready, running, or the reason launching is blocked).
+4. **Info panel**: toggled by the button at the right of the title bar. It shows the type, rule count (lines that are neither blank nor comments), a folder's choice mode and child count, a group's entries, a remote entry's URL and refresh info, a browser profile's settings, and the path of the system hosts.
 
 The dividers between the panels can be dragged to resize them (at least 180 each, and the main panel keeps at least 320). The width is saved on release and restored on the next launch; a narrower window shrinks the panels instead of squeezing the main panel away. The hosts view and the browser view each remember their own list width; in the browser view with the info panel open, the middle hosts tree has its own draggable width and the info panel takes the remaining width.
 
@@ -121,14 +124,26 @@ The dividers between the panels can be dragged to resize them (at least 180 each
 
 - Click **+** in the title bar, or right-click the empty part of the list and choose "Add Hosts Entry". If a folder or an entry inside a folder is selected, the new entry goes into that folder.
 - Double-click an entry, click the pencil icon on its row, or right-click → "Edit" to change its title, a folder's choice mode, or a group's entries. The type cannot be changed after creation.
-- As in SwitchHosts, drag entries (folders and groups included) in the list to reorder or regroup them: drop on the upper or lower half of a row to place the entry before or after it, or on the middle of a folder row to put it at the end of that folder. Hovering a drag over a collapsed folder for about a second expands it. System hosts and trashcan items can't be dragged, and a folder can't be dropped into itself or its subfolders. Moving never changes switches, but when it changes the order of what is written, the hosts file is updated like for other structural edits (when no password is needed).
+- As in SwitchHosts, drag entries (folders and groups included) in the list to reorder or regroup them: drop on the upper or lower half of a row to place the entry before or after it, or on the middle of a folder row to put it at the end of that folder. Hovering a drag over a collapsed folder for about a second expands it. System hosts and trashcan items can't be dragged, and a folder can't be dropped into itself or its subfolders. Moving never changes switches, but when it changes the order of what is written, the hosts file is updated like for other structural edits.
 - "Move to…" in the context menu moves an entry into another folder or to the top level.
 - In the edit sheet, Enter confirms and Esc closes.
 
+### Remote hosts
+
+- Choose the "Remote" type when adding, and fill in the URL (http or https) and the refresh interval: manual, 1 minute, 5 minutes, 15 minutes, 1 hour, 1 day, 1 week (the same options as SwitchHosts). The content is fetched once right after creation. The type cannot be changed afterwards; the URL and interval can be edited in the edit sheet, and changing the URL re-fetches immediately.
+- A remote entry's content is read-only. The info panel shows the URL, the refresh interval, the last refresh time, and a "Refresh Now" button.
+- With an interval other than manual, the app checks every 60 seconds at startup and while running, refreshing entries that are due. A failed refresh keeps the old content and records the attempt's time, waiting a full interval before retrying; automatic failures stay quiet, a manual refresh reports its result.
+- After a successful refresh, the content update follows the same auto-apply rule as local entries: written immediately when the entry is effective.
+- Importing a SwitchHosts backup keeps a remote entry's URL and refresh interval; this app's export writes it back as the remote type, so SwitchHosts can keep subscribing.
+
+### Tray and launch at login
+
+- Closing the window (the title bar's close button) hides the app to the tray: a menu bar icon on macOS, a notification area icon on Windows. The tray menu only has "Show Window" and "Quit". Only ⌘Q / Ctrl+Q and the tray's "Quit" really exit, saving pending edits first. On macOS, clicking the Dock icon also brings the window back.
+- The "Launch at login" checkbox in Preferences takes effect immediately: macOS writes `~/Library/LaunchAgents/com.switchhostslite.app.plist` (a LaunchAgent), Windows writes the `SwitchHostsLite` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. At startup, a missing entry or one pointing at an old path (the app was moved or reinstalled elsewhere) is rewritten automatically; unchecking removes the entry. The Windows uninstaller removes the registry value too.
+
 ### Applying to the system hosts
 
-- Turning a switch on or off writes immediately.
-- Click "Apply" in the title bar, or press <kbd>⌘S</kbd> (macOS) / <kbd>Ctrl+S</kbd> (Windows), to write the content of all effective entries to the system hosts.
+- Switching entries, editing content and adding, deleting or moving entries all write automatically; there is no manual "Apply" button (as in SwitchHosts).
 - What gets written: the system hosts content outside the block + a blank line + the managed block. Each entry in the block starts with `# --- <entry title> ---`; a local entry referenced several times is written only once. When nothing is enabled, the block is removed.
 - If the existing hosts file is not UTF-8 encoded, the app refuses to write it so its content is not damaged.
 
@@ -154,7 +169,7 @@ A browser profile does not write the system hosts. Each profile turns on the hos
 
 The app first tries to write directly. Without permission:
 
-- **macOS**: an administrator password prompt is shown through `osascript`. After writing, the DNS cache is flushed (`dscacheutil -flushcache`, `killall -HUP mDNSResponder`).
+- **macOS**: an administrator password prompt is shown through the system authorization service (`AuthorizationExecuteWithPrivileges`), the same approach SwitchHosts uses for its unsigned builds. The authorization is cached for the app run: you enter the password once per run, later writes (including auto-apply) are silent, and an expired or revoked authorization asks again. After writing, the DNS cache is flushed (`dscacheutil -flushcache`, `killall -HUP mDNSResponder`) and the file is read back to verify the content.
 - **Windows**: the app relaunches itself elevated through UAC (the same binary, which only writes the staged hosts), so the UAC prompt appears. Afterwards `ipconfig /flushdns` runs and the file is read back to confirm its content (antivirus software may block the write). A hosts file locked by another program is reported as such.
 
 You can also give the current user write access to the hosts file; then neither writing nor auto-apply asks for authorization.
@@ -181,7 +196,7 @@ All data lives in a `SwitchHostsLite` folder in the system configuration directo
 | --- | --- |
 | `data.json` | Entries, browser profiles, trashcan, and the "Allow multiple top-level items to be enabled" setting |
 | `history.json` | System hosts history |
-| `settings.json` | Language, theme, color themes, automatic update checks and other preferences |
+| `settings.json` | Language, theme, color themes, automatic update checks, launch at login and other preferences |
 | `profile-tiles/` | Cached composite icons for the browser launch marking |
 | `profile-images/` | Custom profile icon pictures |
 | `themes/` | Your own theme files |
@@ -215,7 +230,6 @@ Put theme files in the gpui-component format (`*.json`) in the `themes/` folder 
 
 | Action | macOS | Windows |
 | --- | --- | --- |
-| Apply to system hosts | <kbd>⌘S</kbd> | <kbd>Ctrl+S</kbd> |
 | Toggle comment | <kbd>⌘/</kbd> or <kbd>Ctrl+/</kbd> | <kbd>Ctrl+/</kbd> |
 | Move line up | <kbd>⌥↑</kbd> | <kbd>Alt+↑</kbd> |
 | Move line down | <kbd>⌥↓</kbd> | <kbd>Alt+↓</kbd> |
@@ -262,11 +276,11 @@ The script builds a release binary, writes `Info.plist` (version taken from `Car
    ```
 
 3. `.github/workflows/release.yml` checks that the tag matches the version, builds macOS (arm64, x86_64) and Windows (x64, ARM64), produces the [files listed above](#download-and-install), writes `SHA256SUMS.txt` and `latest.json` with `scripts/release-manifest.py`, and creates the GitHub Release (with generated release notes). It can also be run by hand from the Actions page with an existing tag.
-4. Tags containing `-` (such as `v1.0.0-beta.1`) are published as pre-releases. The in-app updater reads `releases/latest`, which skips pre-releases, so users never get them.
+4. Tags containing `-` (such as `v1.0.0-beta.1`) are published as pre-releases. The in-app updater reads the GitHub API release list (pre-releases included), so test builds get update prompts too; stable users see pre-releases as well but are asked to confirm before downloading.
 
 ### Update source
 
-The in-app updater fetches `https://github.com/<owner>/<repo>/releases/latest/download/latest.json`. The repository is fixed **at build time**:
+The in-app updater first reads `https://api.github.com/repos/<owner>/<repo>/releases?per_page=20` (pre-releases included, drafts skipped), picks the highest semver release carrying `latest.json`, then fetches that release's `latest.json`. When the API fails (anonymous calls are limited to 60 per hour) it falls back to github.com's `releases.atom` feed and the release page's `expanded_assets` fragment for the version list and the `latest.json` URL; those are ordinary web pages, not subject to the API rate limit. macOS packages come from the `<platform>-dmg` key of `latest.json` (for the manual install); the zip under `<platform>` stays for older versions' auto-update. The repository is fixed **at build time**:
 
 - `SHL_UPDATE_REPO=owner/repo` takes precedence (the release workflow sets it to the current repository);
 - otherwise `repository` in `Cargo.toml` is used (currently `gjfei/SwitchHostsLite`). If it is set to the `OWNER` placeholder, updates are disabled and the menu shows "Check for Updates (no update source)".
