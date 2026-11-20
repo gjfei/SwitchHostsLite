@@ -84,5 +84,6 @@ Section "Uninstall"
 
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
   DeleteRegKey HKLM "Software\SwitchHostsLite"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SwitchHostsLite"
   ; %APPDATA%\SwitchHostsLite holds the user's hosts entries and settings.
 SectionEnd

@@ -62,6 +62,10 @@ fn probe_running(profiles: Vec<BrowserProfile>) -> HashSet<String> {
 /// Load the preferences and apply their language and theme.
 pub fn init(cx: &mut App) {
     cx.set_global(Settings::load());
+    #[cfg(any(target_os = "macos", windows))]
+    if Settings::global(cx).launch_at_login {
+        crate::autostart::repair();
+    }
     preferences::apply_language(cx);
     let appearance = cx.window_appearance();
     preferences::apply_theme(appearance, cx);

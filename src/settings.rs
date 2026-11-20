@@ -79,6 +79,9 @@ pub struct Settings {
     /// Look for a new release at startup, at most once a day.
     #[serde(skip_serializing_if = "is_true")]
     pub check_updates: bool,
+    /// Start the app when the user logs in.
+    #[serde(skip_serializing_if = "is_false")]
+    pub launch_at_login: bool,
     /// Unix time of the last update check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_update_check: Option<i64>,
@@ -104,6 +107,7 @@ impl Default for Settings {
             tree_width: DEFAULT_TREE_WIDTH,
             info_width: DEFAULT_INFO_WIDTH,
             check_updates: true,
+            launch_at_login: false,
             last_update_check: None,
         }
     }
@@ -111,6 +115,10 @@ impl Default for Settings {
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn is_default_list_width(value: &u32) -> bool {
@@ -189,6 +197,17 @@ mod tests {
         let s = Settings { check_updates: false, last_update_check: Some(42), ..Default::default() };
         let text = serde_json::to_string(&s).unwrap();
         assert!(text.contains(r#""check_updates":false"#) && text.contains(r#""last_update_check":42"#));
+        assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn launch_at_login_defaults_off_and_round_trips() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.launch_at_login);
+        assert!(!serde_json::to_string(&Settings::default()).unwrap().contains("launch_at_login"));
+        let s = Settings { launch_at_login: true, ..Default::default() };
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(text.contains(r#""launch_at_login":true"#));
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
     }
 

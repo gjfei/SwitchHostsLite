@@ -775,6 +775,10 @@ err_remote_fetch:
   zh-CN: "远程 hosts 下载失败"
   zh-TW: "遠端 hosts 下載失敗"
   en: "Failed to download the remote hosts"
+err_autostart:
+  zh-CN: "开机启动设置失败"
+  zh-TW: "開機啟動設定失敗"
+  en: "Failed to configure launch at login"
 
 # Updates
 check_for_updates:
@@ -789,6 +793,10 @@ auto_check_updates:
   zh-CN: "自动检查更新"
   zh-TW: "自動檢查更新"
   en: "Automatically check for updates"
+launch_at_login:
+  zh-CN: "开机启动"
+  zh-TW: "開機啟動"
+  en: "Launch at login"
 update_not_configured:
   zh-CN: "未配置更新源"
   zh-TW: "未設定更新來源"

@@ -16,7 +16,13 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use super::{SwitchHostsApp, TOP_BAR_HEIGHT};
+#[cfg(any(target_os = "macos", windows))]
+use crate::autostart;
+#[cfg(any(target_os = "macos", windows))]
+use gpui_kit::component::notification::Notification;
 use crate::i18n::Lang;
+#[cfg(any(target_os = "macos", windows))]
+use crate::i18n::error_text;
 use crate::settings::{LanguagePref, Settings, ThemePref};
 use crate::{highlight, themes};
 
@@ -220,13 +226,32 @@ impl SwitchHostsApp {
                     Settings::update(cx, |s| s.check_updates = checked);
                 });
 
+            let mut general = v_flex().gap_3().child(multi_select).child(check_updates);
+            #[cfg(any(target_os = "macos", windows))]
+            {
+                general = general.child(
+                    Checkbox::new("pref-launch-at-login")
+                        .label(SharedString::from(t!("launch_at_login")))
+                        .checked(settings.launch_at_login)
+                        .cursor_pointer()
+                        .on_click(|checked: &bool, window, cx| {
+                            let checked = *checked;
+                            if let Err(err) = autostart::set(checked) {
+                                window.push_notification(Notification::error(error_text(&err)), cx);
+                                return;
+                            }
+                            Settings::update(cx, |s| s.launch_at_login = checked);
+                        }),
+                );
+            }
+
             dialog.title(t!("preferences")).w(px(420.)).child(
                 v_flex()
                     .gap_5()
                     .pb_2()
                     .child(section(t!("language"), cx).child(language))
                     .child(section(t!("theme"), cx).child(theme).child(color_themes))
-                    .child(v_flex().gap_3().child(multi_select).child(check_updates)),
+                    .child(general),
             )
         });
     }
