@@ -17,8 +17,16 @@ const HISTORY_LIMIT: usize = 50;
 pub enum ItemKind {
     #[default]
     Local,
+    Remote,
     Folder,
     Group,
+}
+
+impl ItemKind {
+    /// Whether items of this kind carry hosts text of their own.
+    pub fn has_content(self) -> bool {
+        matches!(self, Self::Local | Self::Remote)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -74,9 +82,22 @@ pub struct Item {
     pub folder_mode: FolderMode,
     #[serde(default)]
     pub collapsed: bool,
-    /// Ids of local items whose content a group contributes.
+    /// Ids of content items (local or remote) whose content a group contributes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<String>,
+    /// Where a remote item fetches its content from.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    /// Seconds between remote refreshes; 0 means manual only.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub refresh_interval: u64,
+    /// Unix seconds of the last remote refresh attempt, success or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_refresh: Option<i64>,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 impl Item {
@@ -458,7 +479,7 @@ impl Store {
     pub fn locals(&self) -> Vec<(String, String)> {
         fn walk(items: &[Item], out: &mut Vec<(String, String)>) {
             for item in items {
-                if item.kind == ItemKind::Local {
+                if item.kind.has_content() {
                     out.push((item.id.clone(), item.title.clone()));
                 }
                 walk(&item.children, out);
@@ -469,13 +490,13 @@ impl Store {
         out
     }
 
-    /// Content contributed by a group: its included local items, in order.
+    /// Content contributed by a group: its included items, in order.
     pub fn group_content(&self, group: &Item) -> String {
         let mut seen = HashSet::new();
         let mut parts = Vec::new();
         for id in &group.include {
             if let Some(item) = self.find(id)
-                && item.kind == ItemKind::Local
+                && item.kind.has_content()
                 && seen.insert(item.id.clone())
             {
                 parts.push(section(item));
@@ -484,8 +505,8 @@ impl Store {
         parts.join("\n")
     }
 
-    /// Content of every local item that is on or included by a group that is
-    /// on, in tree order. A folder's own switch contributes nothing.
+    /// Content of every local or remote item that is on or included by a group
+    /// that is on, in tree order. A folder's own switch contributes nothing.
     pub fn enabled_content(&self) -> String {
         self.collect(&self.items, true)
     }
@@ -497,7 +518,7 @@ impl Store {
     }
 
     /// Sections contributed by `items` whose switch `on` reports as on; a
-    /// switched-on group adds the local items it includes.
+    /// switched-on group adds the content items it includes.
     fn collect_with(&self, items: &[Item], on: impl Fn(&Item) -> bool) -> String {
         fn walk<'a>(
             store: &'a Store,
@@ -508,7 +529,7 @@ impl Store {
         ) {
             for item in items {
                 match item.kind {
-                    ItemKind::Local => {
+                    ItemKind::Local | ItemKind::Remote => {
                         if on(item) && seen.insert(&item.id) {
                             out.push(section(item));
                         }
@@ -517,7 +538,7 @@ impl Store {
                     ItemKind::Group if on(item) => {
                         for id in &item.include {
                             if let Some(local) = store.find(id)
-                                && local.kind == ItemKind::Local
+                                && local.kind.has_content()
                                 && seen.insert(&local.id)
                             {
                                 out.push(section(local));
@@ -533,20 +554,41 @@ impl Store {
         out.join("\n")
     }
 
-    /// The text an item stands for: a local item's own content, what the
+    /// The text an item stands for: a content item's own text, what the
     /// enabled items inside a folder contribute (every item with
     /// `whole_folder`), or a group's included items.
     pub fn content_of(&self, item: &Item, whole_folder: bool) -> String {
         match item.kind {
-            ItemKind::Local => item.content.clone(),
+            ItemKind::Local | ItemKind::Remote => item.content.clone(),
             ItemKind::Folder => self.collect(&item.children, !whole_folder),
             ItemKind::Group => self.group_content(item),
         }
     }
 
+    /// Remote items whose refresh interval has elapsed: `(id, url)` pairs in
+    /// tree order. A failed attempt stamps `last_refresh` too, so retries
+    /// wait a full interval instead of hammering on every scan.
+    pub fn due_remotes(&self, now: i64) -> Vec<(String, String)> {
+        fn walk(items: &[Item], now: i64, out: &mut Vec<(String, String)>) {
+            for item in items {
+                if item.kind == ItemKind::Remote
+                    && item.refresh_interval > 0
+                    && crate::remote::valid_url(&item.url)
+                    && item.last_refresh.is_none_or(|t| now - t >= item.refresh_interval as i64)
+                {
+                    out.push((item.id.clone(), item.url.clone()));
+                }
+                walk(&item.children, now, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.items, now, &mut out);
+        out
+    }
+
     // -- browser profile switches -------------------------------------------
 
-    /// The hosts content a profile's switches stand for: the local items that
+    /// The hosts content a profile's switches stand for: the content items that
     /// are on, or included by a group that is on, in tree order.
     pub fn switched_content(&self, switches: &[String]) -> String {
         let on: HashSet<&str> = switches.iter().map(String::as_str).collect();
@@ -1350,6 +1392,70 @@ mod tests {
         assert_eq!(store.enabled_content(), "# --- a ---\n1.1.1.1 a\n2.2.2.2 b\n");
     }
 
+    fn remote(title: &str, url: &str, interval: u64, on: bool) -> Item {
+        let mut item = Item::new(ItemKind::Remote, title);
+        item.url = url.into();
+        item.refresh_interval = interval;
+        item.content = "1.1.1.1 remote".into();
+        item.on = on;
+        item
+    }
+
+    #[test]
+    fn remote_items_contribute_like_local_ones() {
+        let r = remote("r", "https://x/hosts", 60, true);
+        let rid = r.id.clone();
+        let mut group = Item::new(ItemKind::Group, "g");
+        group.include = vec![rid.clone()];
+        group.on = true;
+        let store = store(vec![r, group], true);
+        // The group includes it, but it appears only once.
+        assert_eq!(store.enabled_content(), "# --- r ---\n1.1.1.1 remote\n");
+        assert!(store.is_effective(&rid));
+        assert_eq!(store.locals().len(), 1);
+        assert_eq!(store.switched_content(std::slice::from_ref(&rid)), "# --- r ---\n1.1.1.1 remote\n");
+    }
+
+    #[test]
+    fn due_remotes_respect_interval_and_last_attempt() {
+        let mut never = remote("never", "https://x/a", 0, false);
+        never.last_refresh = None;
+        let mut fresh = remote("fresh", "https://x/b", 60, false);
+        fresh.last_refresh = Some(1000);
+        let mut due = remote("due", "https://x/c", 60, false);
+        due.last_refresh = Some(940);
+        let mut first = remote("first", "https://x/d", 300, false);
+        first.last_refresh = None;
+        let bad = remote("bad", "not a url", 60, false);
+        let store = store(
+            vec![folder("f", FolderMode::Multi, false, vec![never, fresh, due, first, bad])],
+            true,
+        );
+        let due_ids: Vec<String> = store.due_remotes(1000).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(due_ids, [id_of(&store, "due"), id_of(&store, "first")]);
+        // A failed attempt stamps last_refresh, so the next scan waits.
+        let mut store = store;
+        store.find_mut(&id_of(&store, "due")).unwrap().last_refresh = Some(1000);
+        assert!(store.due_remotes(1059).iter().all(|(id, _)| *id != id_of(&store, "due")));
+        assert!(store.due_remotes(1060).iter().any(|(id, _)| *id == id_of(&store, "due")));
+    }
+
+    #[test]
+    fn remote_fields_survive_json_round_trip_with_defaults() {
+        let r = remote("r", "https://x/hosts", 300, true);
+        let text = serde_json::to_string(&r).unwrap();
+        let back: Item = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.kind, ItemKind::Remote);
+        assert_eq!(back.url, "https://x/hosts");
+        assert_eq!(back.refresh_interval, 300);
+        // Old data files carry none of the new fields.
+        let old: Item = serde_json::from_str(r#"{"id":"a","title":"A","kind":"local"}"#).unwrap();
+        assert_eq!(old.kind, ItemKind::Local);
+        assert!(old.url.is_empty() && old.refresh_interval == 0 && old.last_refresh.is_none());
+        let plain = serde_json::to_string(&old).unwrap();
+        assert!(!plain.contains("url") && !plain.contains("refresh_interval") && !plain.contains("last_refresh"));
+    }
+
     #[test]
     fn import_switchhosts_v4() {
         let text = r#"{"data":{"list":{"tree":[
@@ -1363,7 +1469,7 @@ mod tests {
         assert_eq!(store.items[0].content, "127.0.0.1 dev");
         assert!(on_titles(&store).is_empty() && multi.is_none());
         assert_eq!(store.items[1].folder_mode, FolderMode::Single);
-        assert_eq!(store.items[1].children[0].kind, ItemKind::Local);
+        assert_eq!(store.items[1].children[0].kind, ItemKind::Remote);
     }
 
     #[test]

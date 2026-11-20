@@ -1014,7 +1014,7 @@ impl SwitchHostsApp {
         for item in items {
             let open = !profile.collapsed.contains(&item.id);
             let checked = profile.switches.contains(&item.id);
-            let count = (item.kind == ItemKind::Local).then(|| {
+            let count = item.kind.has_content().then(|| {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)

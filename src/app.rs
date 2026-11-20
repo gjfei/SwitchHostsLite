@@ -20,7 +20,7 @@ use crate::browser::{self, BrowserProfile};
 use crate::i18n::error_text;
 use crate::settings::{Settings, ThemePref};
 use crate::store::{FolderMode, History, Item, ItemKind, Store, TrashItem, TrashedProfile};
-use crate::{editor_ops, highlight, hosts, panels, store, tile};
+use crate::{editor_ops, highlight, hosts, panels, remote, store, tile};
 
 mod backup;
 mod browser_panel;
@@ -49,6 +49,8 @@ const AUTO_APPLY_DELAY: Duration = Duration::from_millis(1000);
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// How often the open browser view re-probes browser processes.
 const RUNNING_POLL: Duration = Duration::from_secs(2);
+/// How often remote items are scanned for a due refresh.
+const REMOTE_POLL: Duration = Duration::from_secs(60);
 /// Height of the window title bar, which doubles as the main toolbar.
 pub(crate) const TOP_BAR_HEIGHT: Pixels = px(44.);
 
@@ -149,6 +151,8 @@ pub struct SwitchHostsApp {
     profile_procs: HashSet<String>,
     /// Bumped when the browser view opens, so older polling loops stop.
     running_generation: u64,
+    /// Remote items with a fetch in flight.
+    refreshing: HashSet<String>,
     launching: bool,
     stopping: bool,
     profile_inputs: Option<browser_panel::ProfileInputs>,
@@ -237,7 +241,7 @@ impl SwitchHostsApp {
 
         let settings = Settings::global(cx);
 
-        Self {
+        let mut app = Self {
             store,
             history: None,
             selected: Selection::System,
@@ -255,6 +259,7 @@ impl SwitchHostsApp {
             launched: HashMap::new(),
             profile_procs: HashSet::new(),
             running_generation: 0,
+            refreshing: HashSet::new(),
             launching: false,
             stopping: false,
             profile_inputs: None,
@@ -273,7 +278,9 @@ impl SwitchHostsApp {
             revision: 0,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
-        }
+        };
+        app.start_remote_poll(window, cx);
+        app
     }
 
     fn new_editor(value: String, window: &mut Window, cx: &mut Context<Self>) -> Entity<EditorState> {
@@ -400,7 +407,7 @@ impl SwitchHostsApp {
         }
         let rules = match self.current() {
             Current::System => store::count_rules(&self.system_hosts),
-            Current::Item(item) if item.kind == ItemKind::Local => store::count_rules(&item.content),
+            Current::Item(item) if item.kind.has_content() => store::count_rules(&item.content),
             Current::Item(item) => store::count_rules(&self.store.content_of(item, false)),
             Current::Browser(profile) => {
                 browser::mappings(&self.store.switched_content(&profile.switches)).len()
@@ -1099,6 +1106,97 @@ impl SwitchHostsApp {
         .detach();
     }
 
+    /// Fetch a remote item's content in the background. A manual refresh
+    /// reports the outcome; an automatic one stays silent unless it fails to
+    /// even start. The attempt stamps `last_refresh` either way, so a failing
+    /// URL is retried once per interval, not once per scan.
+    fn refresh_remote(&mut self, id: String, manual: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refreshing.contains(&id) {
+            return;
+        }
+        let Some(item) = self.store.find(&id) else { return };
+        if item.kind != ItemKind::Remote {
+            return;
+        }
+        if !remote::valid_url(&item.url) {
+            if manual {
+                Self::notify_error(window, t!("err_remote_url"), cx);
+            }
+            return;
+        }
+        let url = item.url.clone();
+        self.refreshing.insert(id.clone());
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let fetch_url = url.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { remote::fetch(&fetch_url) })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                this.refreshing.remove(&id);
+                let now = store::now();
+                match result {
+                    Ok(content) => {
+                        // The item may have been deleted or its URL edited
+                        // while the fetch ran; such a result is discarded.
+                        let unchanged = this
+                            .store
+                            .find(&id)
+                            .is_some_and(|i| i.kind == ItemKind::Remote && i.url == url);
+                        if unchanged {
+                            this.mutate(window, cx, |store| {
+                                if let Some(item) = store.find_mut(&id) {
+                                    item.content = content;
+                                    item.last_refresh = Some(now);
+                                }
+                            });
+                            if manual {
+                                window.push_notification(Notification::success(t!("remote_refreshed")), cx);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if let Some(item) = this.store.find_mut(&id) {
+                            item.last_refresh = Some(now);
+                        }
+                        this.persist(cx);
+                        if manual {
+                            Self::notify_error(window, error_text(&err), cx);
+                        } else {
+                            eprintln!("remote refresh failed: {err:#}");
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Refresh due remote items every minute, starting right away so items
+    /// overdue while the app was closed catch up at startup. The loop ends
+    /// when the view is gone (app quit).
+    fn start_remote_poll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                let ok = this
+                    .update_in(cx, |this, window, cx| {
+                        for (id, _) in this.store.due_remotes(store::now()) {
+                            this.refresh_remote(id, false, window, cx);
+                        }
+                    })
+                    .is_ok();
+                if !ok {
+                    break;
+                }
+                cx.background_executor().timer(REMOTE_POLL).await;
+            }
+        })
+        .detach();
+    }
+
     fn record_history(&mut self, previous: &str, next: &str) {
         if previous == next {
             return;
@@ -1167,6 +1265,7 @@ fn sheet_footer(cx: &App) -> Div {
 fn item_icon(item: &Item) -> IconName {
     match item.kind {
         ItemKind::Local => IconName::FileText,
+        ItemKind::Remote => IconName::Globe,
         ItemKind::Folder if item.collapsed => IconName::Folder,
         ItemKind::Folder => IconName::FolderOpen,
         ItemKind::Group => IconName::Layers,
@@ -1176,6 +1275,7 @@ fn item_icon(item: &Item) -> IconName {
 fn kind_label(kind: ItemKind) -> SharedString {
     match kind {
         ItemKind::Local => t!("kind_local"),
+        ItemKind::Remote => t!("kind_remote"),
         ItemKind::Group => t!("kind_group"),
         ItemKind::Folder => t!("kind_folder"),
     }

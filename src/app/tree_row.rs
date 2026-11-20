@@ -70,6 +70,7 @@ pub(super) fn item_row(
     let is_folder = item.kind == ItemKind::Folder;
     let icon = match item.kind {
         ItemKind::Local => IconName::FileText,
+        ItemKind::Remote => IconName::Globe,
         ItemKind::Group => IconName::Layers,
         ItemKind::Folder if state.open => IconName::FolderOpen,
         ItemKind::Folder => IconName::Folder,

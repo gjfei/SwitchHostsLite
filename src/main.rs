@@ -12,6 +12,7 @@ mod i18n;
 mod macos;
 mod panels;
 mod platform;
+mod remote;
 mod settings;
 mod store;
 mod switchhosts;
@@ -42,7 +43,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 // asset source does not serve, so every icon the app names must appear here
 // (or already be in that subset, like the `Close` cross used for clearing).
 icon_assets!(ExtraIcons, [
-    Clock, Globe, Layers, List, Lock, Monitor, Pencil, PencilLine, Play, RotateCcw, Save, Square, Trash
+    Clock, Globe, Layers, List, Lock, Monitor, Pencil, PencilLine, Play, RefreshCw, RotateCcw, Save, Square, Trash
 ]);
 
 // The bundle icons (icns/ico) are not assets gpui can load; the About dialog

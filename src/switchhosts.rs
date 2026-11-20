@@ -173,7 +173,8 @@ fn convert(
             node.get("type")
         };
         let kind = match kind_field.and_then(Value::as_str).unwrap_or("local") {
-            "local" | "remote" => ItemKind::Local,
+            "local" => ItemKind::Local,
+            "remote" => ItemKind::Remote,
             "folder" => ItemKind::Folder,
             "group" => ItemKind::Group,
             other => fail!("err_unknown_type", kind = other),
@@ -185,8 +186,8 @@ fn convert(
         }
 
         let content = match kind {
-            ItemKind::Local if version == 3 => node["content"].as_str().unwrap_or_default(),
-            ItemKind::Local => source.contents.get(&old_id).map(String::as_str).unwrap_or_default(),
+            k if k.has_content() && version == 3 => node["content"].as_str().unwrap_or_default(),
+            k if k.has_content() => source.contents.get(&old_id).map(String::as_str).unwrap_or_default(),
             _ => "",
         }
         .replace("\r\n", "\n");
@@ -219,6 +220,9 @@ fn convert(
             },
             collapsed: node["is_collapsed"] == true || node["folder_open"] == false,
             include,
+            url: node["url"].as_str().unwrap_or_default().to_string(),
+            refresh_interval: node["refresh_interval"].as_u64().unwrap_or(0),
+            last_refresh: None,
         });
     }
     Ok(items)
@@ -305,8 +309,12 @@ pub fn export_v4(store: &Store) -> Value {
 fn node_v4(item: &Item, hosts: &mut Vec<Value>) -> Value {
     let mut node = json!({ "id": item.id, "title": item.title, "on": item.on });
     match item.kind {
-        ItemKind::Local => {
-            node["type"] = json!("local");
+        ItemKind::Local | ItemKind::Remote => {
+            node["type"] = json!(if item.kind == ItemKind::Remote { "remote" } else { "local" });
+            if item.kind == ItemKind::Remote {
+                node["url"] = json!(item.url);
+                node["refresh_interval"] = json!(item.refresh_interval);
+            }
             // PotDb keys collection documents by `_id`.
             hosts.push(json!({ "_id": new_id(), "id": item.id, "content": item.content }));
         }
@@ -347,7 +355,7 @@ mod tests {
                 {"id":"0","title":"System","is_sys":true},
                 {"id":"a","title":"Dev","type":"local","on":true},
                 {"id":7,"title":"Team","type":"folder","on":true,"folder_mode":1,"folder_open":false,"children":[
-                    {"id":"r","title":"Remote","type":"remote","on":true,"url":"https://x"}]},
+                    {"id":"r","title":"Remote","type":"remote","on":true,"url":"https://x","refresh_interval":300}]},
                 {"id":"g","title":"Both","type":"group","include":["a","r","missing"]}
             ],"trashcan":[]},
             "collection":{"hosts":{"data":[
@@ -360,6 +368,9 @@ mod tests {
         assert_eq!(items[1].folder_mode, FolderMode::Single);
         assert!(items[1].collapsed);
         assert_eq!(items[1].children[0].content, "1.1.1.1 remote");
+        assert_eq!(items[1].children[0].kind, ItemKind::Remote);
+        assert_eq!(items[1].children[0].url, "https://x");
+        assert_eq!(items[1].children[0].refresh_interval, 300);
         assert_eq!(items[2].include, [items[0].id.clone(), items[1].children[0].id.clone()]);
     }
 
@@ -409,8 +420,13 @@ mod tests {
         let mut group = Item::new(ItemKind::Group, "G");
         group.include = vec![local.id.clone()];
         group.on = true;
+        let mut remote = Item::new(ItemKind::Remote, "R");
+        remote.url = "https://x/hosts".into();
+        remote.refresh_interval = 3600;
+        remote.content = "2.2.2.2 r".into();
+        remote.on = true;
         let store = Store {
-            items: vec![folder, group],
+            items: vec![folder, group, remote],
             trash: Vec::new(),
             profiles: Vec::new(),
             trash_profiles: Vec::new(),
@@ -430,6 +446,11 @@ mod tests {
         assert!(!items[0].on && items[0].children[0].on && items[1].on);
         assert_eq!(items[0].children[0].content, "1.1.1.1 a");
         assert_eq!(items[1].include, [items[0].children[0].id.clone()]);
+        assert_eq!(items[2].kind, ItemKind::Remote);
+        assert_eq!(items[2].url, "https://x/hosts");
+        assert_eq!(items[2].refresh_interval, 3600);
+        assert_eq!(items[2].content, "2.2.2.2 r");
+        assert!(items[2].on && items[2].last_refresh.is_none());
 
         let mut foreign = exported;
         foreign.as_object_mut().unwrap().remove(LITE_KEY);

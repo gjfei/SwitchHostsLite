@@ -3,11 +3,12 @@ use std::cell::Cell;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IndexPath, Sizable as _, StyledExt as _, WindowExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _, Toggle, ToggleGroup, ToggleVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     radio::{Radio, RadioGroup},
+    select::{SearchableVec, Select, SelectState},
     sheet::Sheet,
     v_flex,
 };
@@ -18,9 +19,10 @@ use rust_i18n::t;
 use super::{
     Selection, SwitchHostsApp, display_title, folder_mode_label, kind_label, sheet_footer, sheet_width,
 };
+use crate::remote;
 use crate::store::{FolderMode, Item, ItemKind};
 
-const KINDS: [ItemKind; 3] = [ItemKind::Local, ItemKind::Group, ItemKind::Folder];
+const KINDS: [ItemKind; 4] = [ItemKind::Local, ItemKind::Remote, ItemKind::Group, ItemKind::Folder];
 const FOLDER_MODES: [FolderMode; 3] = [FolderMode::Default, FolderMode::Single, FolderMode::Multi];
 
 /// State of the add / edit sheet while it is open.
@@ -29,6 +31,8 @@ pub(super) struct EditDraft {
     id: Option<String>,
     kind: ItemKind,
     title_input: Entity<InputState>,
+    url_input: Entity<InputState>,
+    interval: Entity<SelectState<SearchableVec<SharedString>>>,
     folder_mode: FolderMode,
     include: Vec<String>,
     parent_id: Option<String>,
@@ -38,6 +42,7 @@ pub(super) struct EditDraft {
 fn kind_icon(kind: ItemKind) -> IconName {
     match kind {
         ItemKind::Local => IconName::FileText,
+        ItemKind::Remote => IconName::Globe,
         ItemKind::Group => IconName::Layers,
         ItemKind::Folder => IconName::Folder,
     }
@@ -86,10 +91,25 @@ impl SwitchHostsApp {
                 this.submit_draft(window, cx);
             }
         });
+        let url_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("https://example.com/hosts")
+                .default_value(template.url)
+        });
+        let labels: Vec<SharedString> = remote::INTERVALS
+            .map(|secs| remote::interval_label(secs).into())
+            .to_vec();
+        let selected = remote::INTERVALS
+            .iter()
+            .position(|secs| *secs == template.refresh_interval)
+            .map(IndexPath::new);
+        let interval = cx.new(|cx| SelectState::new(SearchableVec::new(labels), selected, window, cx));
         self.edit_draft = Some(EditDraft {
             id,
             kind: template.kind,
             title_input: title_input.clone(),
+            url_input,
+            interval,
             folder_mode: template.folder_mode,
             include: template.include,
             parent_id,
@@ -117,6 +137,20 @@ impl SwitchHostsApp {
     }
 
     fn submit_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = &self.edit_draft else {
+            return;
+        };
+        let url = draft.url_input.read(cx).value().to_string();
+        if draft.kind == ItemKind::Remote && !remote::valid_url(&url) {
+            Self::notify_error(window, t!("err_remote_url"), cx);
+            return;
+        }
+        let interval = draft
+            .interval
+            .read(cx)
+            .selected_index(cx)
+            .map(|ix| remote::INTERVALS[ix.row])
+            .unwrap_or(0);
         let Some(draft) = self.edit_draft.take() else {
             return;
         };
@@ -127,16 +161,23 @@ impl SwitchHostsApp {
             let mut item = Item::new(draft.kind, title);
             item.folder_mode = draft.folder_mode;
             item.include = draft.include;
+            if draft.kind == ItemKind::Remote {
+                item.url = url;
+                item.refresh_interval = interval;
+            }
             let id = item.id.clone();
             let parent = draft.parent_id;
             self.mutate(window, cx, |store| store.insert(item, parent.as_deref()));
-            self.select(Selection::Item(id), window, cx);
-            if draft.kind == ItemKind::Local {
-                self.editor.update(cx, |state, cx| state.focus(window, cx));
+            self.select(Selection::Item(id.clone()), window, cx);
+            match draft.kind {
+                ItemKind::Local => self.editor.update(cx, |state, cx| state.focus(window, cx)),
+                ItemKind::Remote => self.refresh_remote(id, true, window, cx),
+                _ => {}
             }
             return;
         };
 
+        let url_changed = self.store.find(&id).is_some_and(|item| item.url != url);
         let (mode, include) = (draft.folder_mode, draft.include);
         self.mutate(window, cx, |store| {
             let Some(item) = store.find_mut(&id) else {
@@ -146,9 +187,19 @@ impl SwitchHostsApp {
             match item.kind {
                 ItemKind::Folder => item.folder_mode = mode,
                 ItemKind::Group => item.include = include,
+                ItemKind::Remote => {
+                    item.url = url;
+                    item.refresh_interval = interval;
+                    if url_changed {
+                        item.last_refresh = None;
+                    }
+                }
                 ItemKind::Local => {}
             }
         });
+        if draft.kind == ItemKind::Remote && url_changed {
+            self.refresh_remote(id, true, window, cx);
+        }
     }
 
     fn toggle_include(&mut self, id: String, cx: &mut Context<Self>) {
@@ -212,6 +263,15 @@ impl SwitchHostsApp {
         });
 
         let extra = match kind {
+            ItemKind::Remote => Some(
+                v_flex()
+                    .gap_5()
+                    .child(field(t!("remote_url"), fg).child(Input::new(&draft.url_input)))
+                    .child(
+                        field(t!("refresh_interval"), fg)
+                            .child(Select::new(&draft.interval).menu_max_h(px(220.)).cursor_pointer()),
+                    ),
+            ),
             ItemKind::Group => {
                 Some(field(t!("content"), fg).child(Self::render_include_picker(view, &draft.include, cx)))
             }
@@ -295,7 +355,7 @@ impl SwitchHostsApp {
             .on_close(move |_, _, cx| close_view.update(cx, |this, _| this.edit_draft = None))
     }
 
-    /// Two lists of local items; clicking an entry moves it to the other list.
+    /// Two lists of content items; clicking an entry moves it to the other list.
     fn render_include_picker(view: &Entity<Self>, include: &[String], cx: &App) -> AnyElement {
         let theme = cx.theme();
         let (border, hover, muted) = (theme.border, theme.list_hover, theme.muted_foreground);

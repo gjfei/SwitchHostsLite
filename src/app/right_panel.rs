@@ -1,15 +1,16 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
 use super::{Current, SwitchHostsApp, display_title, folder_mode_label, item_icon, kind_label};
 use crate::store::{self, Item, ItemKind, TrashItem};
-use crate::hosts;
+use crate::{hosts, remote};
 
 pub(super) fn heading(icon: IconName, title: SharedString) -> impl IntoElement {
     h_flex()
@@ -111,22 +112,54 @@ impl SwitchHostsApp {
                             .into_any_element()
                     });
             }
+            ItemKind::Remote => {
+                fields = fields
+                    .child(field(t!("remote_url"), item.url.clone(), cx))
+                    .child(field(t!("refresh_interval"), remote::interval_label(item.refresh_interval), cx))
+                    .child(field(
+                        t!("last_refresh"),
+                        item.last_refresh
+                            .map(store::format_time)
+                            .unwrap_or_else(|| t!("refresh_not_yet").to_string()),
+                        cx,
+                    ));
+            }
             ItemKind::Local => {}
         }
 
+        let refresh_id = item.id.clone();
+        let refreshing = self.refreshing.contains(&item.id);
         v_flex()
             .flex_1()
             .gap_3()
             .child(heading(item_icon(item), display_title(&item.title)))
             .child(
-                Button::new("info-edit")
-                    .outline()
-                    .small()
-                    .label(t!("edit"))
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_edit_sheet(edit_id.clone(), window, cx)
-                    })),
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("info-edit")
+                            .outline()
+                            .small()
+                            .label(t!("edit"))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_edit_sheet(edit_id.clone(), window, cx)
+                            })),
+                    )
+                    .when(item.kind == ItemKind::Remote, |this| {
+                        this.child(
+                            Button::new("info-refresh")
+                                .outline()
+                                .small()
+                                .icon(IconName::RefreshCw)
+                                .label(t!("refresh_now"))
+                                .disabled(refreshing)
+                                .when(!refreshing, |b| b.cursor_pointer())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.refresh_remote(refresh_id.clone(), true, window, cx)
+                                })),
+                        )
+                    }),
             )
             .child(fields)
             .child(div().flex_1())

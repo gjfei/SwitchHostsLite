@@ -57,6 +57,10 @@ kind_local:
   zh-CN: "本地"
   zh-TW: "本機"
   en: "Local"
+kind_remote:
+  zh-CN: "远程"
+  zh-TW: "遠端"
+  en: "Remote"
 kind_group:
   zh-CN: "组合"
   zh-TW: "群組"
@@ -121,6 +125,64 @@ include_click_to_add:
   zh-CN: "点击左侧方案添加"
   zh-TW: "按一下左側項目以加入"
   en: "Click an item on the left to add it"
+
+# Remote hosts
+remote_url:
+  zh-CN: "URL"
+  zh-TW: "URL"
+  en: "URL"
+refresh_interval:
+  zh-CN: "刷新间隔"
+  zh-TW: "重新整理間隔"
+  en: "Refresh Interval"
+refresh_now:
+  zh-CN: "立即刷新"
+  zh-TW: "立即重新整理"
+  en: "Refresh Now"
+last_refresh:
+  zh-CN: "上次刷新"
+  zh-TW: "上次重新整理"
+  en: "Last Refresh"
+refresh_not_yet:
+  zh-CN: "尚未刷新"
+  zh-TW: "尚未重新整理"
+  en: "Not yet"
+remote_refreshed:
+  zh-CN: "远程 hosts 已刷新"
+  zh-TW: "遠端 hosts 已重新整理"
+  en: "Remote hosts refreshed"
+refresh_never:
+  zh-CN: "手动"
+  zh-TW: "手動"
+  en: "Manual"
+refresh_1m:
+  zh-CN: "1 分钟"
+  zh-TW: "1 分鐘"
+  en: "1 minute"
+refresh_5m:
+  zh-CN: "5 分钟"
+  zh-TW: "5 分鐘"
+  en: "5 minutes"
+refresh_15m:
+  zh-CN: "15 分钟"
+  zh-TW: "15 分鐘"
+  en: "15 minutes"
+refresh_1h:
+  zh-CN: "1 小时"
+  zh-TW: "1 小時"
+  en: "1 hour"
+refresh_1d:
+  zh-CN: "1 天"
+  zh-TW: "1 天"
+  en: "1 day"
+refresh_1w:
+  zh-CN: "1 周"
+  zh-TW: "1 週"
+  en: "1 week"
+refresh_secs:
+  zh-CN: "%{count} 秒"
+  zh-TW: "%{count} 秒"
+  en: "%{count} seconds"
 
 # Trash
 move_to_trash:
@@ -705,6 +767,14 @@ err_unknown_type:
   zh-CN: "未知的项目类型：%{kind}"
   zh-TW: "未知的項目類型：%{kind}"
   en: "Unknown item type: %{kind}"
+err_remote_url:
+  zh-CN: "请输入有效的 http(s) 地址"
+  zh-TW: "請輸入有效的 http(s) 位址"
+  en: "Enter a valid http(s) URL"
+err_remote_fetch:
+  zh-CN: "远程 hosts 下载失败"
+  zh-TW: "遠端 hosts 下載失敗"
+  en: "Failed to download the remote hosts"
 
 # Updates
 check_for_updates:
