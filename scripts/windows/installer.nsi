@@ -108,13 +108,13 @@ LangString APP_RUNNING_MANUAL ${LANG_SIMPCHINESE} "SwitchHosts Lite 正在运行
       Abort
     ${EndIf}
     StrCmp $R1 0 manual
-    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "$(APP_RUNNING)" IDYES quick IDNO manual IDCANCEL cancel
-    quick:
+    ; MessageBox takes at most two return-check jumps; Yes falls through.
+    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "$(APP_RUNNING)" /SD IDYES IDNO manual IDCANCEL cancel
     Call ${UN}PostQuit
     Call ${UN}WaitExit
     Goto check
     manual:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(APP_RUNNING_MANUAL)" IDRETRY check IDCANCEL cancel
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(APP_RUNNING_MANUAL)" /SD IDRETRY IDRETRY check IDCANCEL cancel
     cancel:
     Abort
     done:
