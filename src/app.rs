@@ -39,7 +39,7 @@ use splitter::PanelEdge;
 
 actions!(
     switch_hosts,
-    [ApplyHosts, ToggleComment, MoveLineUp, MoveLineDown, DuplicateLine, DeleteLine]
+    [ToggleComment, MoveLineUp, MoveLineDown, DuplicateLine, DeleteLine]
 );
 
 /// Key context of the code editor, excluding single-line inputs.
@@ -74,8 +74,6 @@ pub fn init(cx: &mut App) {
 pub fn bind_keys(cx: &mut App) {
     let editor = Some(EDITOR_CONTEXT);
     cx.bind_keys([
-        KeyBinding::new("cmd-s", ApplyHosts, None),
-        KeyBinding::new("ctrl-s", ApplyHosts, None),
         KeyBinding::new("ctrl-/", ToggleComment, editor),
         KeyBinding::new("alt-up", MoveLineUp, editor),
         KeyBinding::new("alt-down", MoveLineDown, editor),
@@ -491,13 +489,12 @@ impl SwitchHostsApp {
     }
 
     /// Mutate the store. A change of the enabled content is written right
-    /// away only when that needs no password prompt; otherwise it waits for
-    /// an explicit apply.
+    /// away, asking for privileges when needed.
     fn mutate(&mut self, window: &mut Window, cx: &mut Context<Self>, f: impl FnOnce(&mut Store)) {
         let before = self.store.enabled_content();
         f(&mut self.store);
         self.store_changed(window, cx);
-        if self.store.enabled_content() != before && hosts::can_write_directly() {
+        if self.store.enabled_content() != before {
             self.apply(None, true, window, cx);
         }
     }
@@ -1084,8 +1081,7 @@ impl SwitchHostsApp {
         .detach();
     }
 
-    /// Apply edits of an effective item once typing pauses, but only when no
-    /// password prompt is needed.
+    /// Apply edits of an effective item once typing pauses.
     fn schedule_auto_apply(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_generation += 1;
         let generation = self.edit_generation;
@@ -1095,7 +1091,6 @@ impl SwitchHostsApp {
                 if this.edit_generation != generation
                     || !this.store.is_effective(&id)
                     || this.is_applied()
-                    || !hosts::can_write_directly()
                 {
                     return;
                 }
@@ -1224,19 +1219,6 @@ impl SwitchHostsApp {
         }
         cx.notify();
     }
-
-    fn on_apply(&mut self, _: &ApplyHosts, window: &mut Window, cx: &mut Context<Self>) {
-        self.apply(None, false, window, cx);
-    }
-}
-
-/// Label of the shortcut bound to `cmd-<key>` on macOS and `ctrl-<key>` elsewhere.
-fn shortcut_label(key: &str) -> String {
-    if cfg!(target_os = "macos") {
-        format!("⌘{key}")
-    } else {
-        format!("Ctrl+{key}")
-    }
 }
 
 fn display_title(title: &str) -> SharedString {
@@ -1338,7 +1320,6 @@ impl Render for SwitchHostsApp {
         v_flex()
             .track_focus(&self.focus_handle)
             .key_context("SwitchHostsApp")
-            .on_action(cx.listener(Self::on_apply))
             .on_action(cx.listener(|this, _: &ToggleComment, window, cx| {
                 this.run_editor_op(editor_ops::toggle_comment, window, cx)
             }))

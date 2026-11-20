@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::{Current, SwitchHostsApp, TOP_BAR_HEIGHT, display_title, item_icon, shortcut_label};
+use super::{Current, SwitchHostsApp, TOP_BAR_HEIGHT, display_title, item_icon};
 use super::browser_panel::{block_label, mode_short};
 use super::splitter::PanelEdge;
 
@@ -32,8 +32,7 @@ impl SwitchHostsApp {
     /// The window title bar, which doubles as the main toolbar.
     pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let (muted, border, warning) = (theme.muted_foreground, theme.border, theme.warning);
-        let applied = self.is_applied();
+        let (muted, border) = (theme.muted_foreground, theme.border);
         let in_browser = self.in_browser_view();
 
         let (icon, title) = match self.current() {
@@ -132,15 +131,6 @@ impl SwitchHostsApp {
                         })
                         .children(switch.map(no_drag)),
                 )
-                .when(!applied && !in_browser, |this| {
-                    this.child(
-                        div()
-                            .flex_shrink_0()
-                            .text_xs()
-                            .text_color(warning)
-                            .child(t!("unapplied_changes")),
-                    )
-                })
                 .child(no_drag(
                     Button::new("history")
                         .ghost()
@@ -150,54 +140,40 @@ impl SwitchHostsApp {
                         .cursor_pointer()
                         .on_click(cx.listener(|this, _, window, cx| this.open_history(window, cx))),
                 ))
-                .map(|this| {
-                    if in_browser {
-                        let stoppable =
-                            self.selected_profile().is_some_and(|profile| self.profile_stoppable(profile));
-                        if stoppable {
-                            return this.child(no_drag(
-                                Button::new("stop-profile")
-                                    .danger()
-                                    .small()
-                                    .icon(IconName::Square)
-                                    .label(t!("stop"))
-                                    .loading(self.stopping)
-                                    .tooltip(t!("stop"))
-                                    .when(!self.stopping, |this| this.cursor_pointer())
-                                    .on_click(cx.listener(|this, _, window, cx| this.stop_profile(window, cx))),
-                            ));
-                        }
-                        let blocked = self.profile_block();
-                        let launchable = blocked.is_none();
-                        let tooltip = match (blocked, self.selected_profile()) {
-                            (Some(block), Some(profile)) => block_label(block, profile.browser),
-                            _ => t!("launch").into(),
-                        };
-                        this.child(no_drag(
-                            Button::new("launch-profile")
-                                .primary()
+                .when(in_browser, |this| {
+                    let stoppable =
+                        self.selected_profile().is_some_and(|profile| self.profile_stoppable(profile));
+                    if stoppable {
+                        return this.child(no_drag(
+                            Button::new("stop-profile")
+                                .danger()
                                 .small()
-                                .icon(IconName::Play)
-                                .label(t!("launch"))
-                                .loading(self.launching)
-                                .disabled(!launchable)
-                                .tooltip(tooltip)
-                                .when(launchable, |this| this.cursor_pointer())
-                                .on_click(cx.listener(|this, _, window, cx| this.launch_profile(window, cx))),
-                        ))
-                    } else {
-                        this.child(no_drag(
-                            Button::new("apply")
-                                .primary()
-                                .small()
-                                .icon(IconName::Save)
-                                .label(t!("apply"))
-                                .loading(self.applying)
-                                .tooltip(t!("apply_tooltip", shortcut = shortcut_label("S")))
-                                .when(!self.applying, |this| this.cursor_pointer())
-                                .on_click(cx.listener(|this, _, window, cx| this.apply(None, false, window, cx))),
-                        ))
+                                .icon(IconName::Square)
+                                .label(t!("stop"))
+                                .loading(self.stopping)
+                                .tooltip(t!("stop"))
+                                .when(!self.stopping, |this| this.cursor_pointer())
+                                .on_click(cx.listener(|this, _, window, cx| this.stop_profile(window, cx))),
+                        ));
                     }
+                    let blocked = self.profile_block();
+                    let launchable = blocked.is_none();
+                    let tooltip = match (blocked, self.selected_profile()) {
+                        (Some(block), Some(profile)) => block_label(block, profile.browser),
+                        _ => t!("launch").into(),
+                    };
+                    this.child(no_drag(
+                        Button::new("launch-profile")
+                            .primary()
+                            .small()
+                            .icon(IconName::Play)
+                            .label(t!("launch"))
+                            .loading(self.launching)
+                            .disabled(!launchable)
+                            .tooltip(tooltip)
+                            .when(launchable, |this| this.cursor_pointer())
+                            .on_click(cx.listener(|this, _, window, cx| this.launch_profile(window, cx))),
+                    ))
                 })
                 .child(no_drag(
                     Button::new("toggle-info")
@@ -217,7 +193,7 @@ impl SwitchHostsApp {
 
     pub(super) fn render_main_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let (muted, border, warning) = (theme.muted_foreground, theme.border, theme.warning);
+        let (muted, border) = (theme.muted_foreground, theme.border);
         if self.in_browser_view() {
             let content = match self.selected_profile() {
                 Some(profile) => self.render_profile_tree(profile, cx),
@@ -243,7 +219,6 @@ impl SwitchHostsApp {
                 .into_any_element();
         }
         let readonly = self.editor_readonly();
-        let applied = self.is_applied();
         let (lines, bytes) = {
             let text = self.editor.read(cx).text();
             (text.lines_len(), text.len())
@@ -258,15 +233,7 @@ impl SwitchHostsApp {
             .into_any_element();
         let status = h_flex()
             .flex_shrink_0()
-            .gap_3()
             .when(readonly, |this| this.child(t!("read_only")))
-            .map(|this| {
-                if applied {
-                    this.child(t!("applied"))
-                } else {
-                    this.child(div().text_color(warning).child(t!("unapplied_changes")))
-                }
-            })
             .into_any_element();
 
         v_flex()

@@ -25,10 +25,6 @@ edit:
   zh-CN: "编辑"
   zh-TW: "編輯"
   en: "Edit"
-apply:
-  zh-CN: "应用"
-  zh-TW: "套用"
-  en: "Apply"
 untitled:
   zh-CN: "未命名"
   zh-TW: "未命名"
@@ -635,18 +631,6 @@ read_only:
   zh-CN: "只读"
   zh-TW: "唯讀"
   en: "Read Only"
-unapplied_changes:
-  zh-CN: "有未应用的更改"
-  zh-TW: "有尚未套用的變更"
-  en: "Unapplied changes"
-applied:
-  zh-CN: "已应用"
-  zh-TW: "已套用"
-  en: "Applied"
-apply_tooltip:
-  zh-CN: "将已启用的方案写入系统 hosts（%{shortcut}）"
-  zh-TW: "將已啟用的項目寫入系統 hosts（%{shortcut}）"
-  en: "Write the enabled items to the system hosts (%{shortcut})"
 line_count:
   zh-CN: "%{count} 行"
   zh-TW: "%{count} 行"
@@ -719,10 +703,6 @@ err_write_temp:
   zh-CN: "写入临时文件失败"
   zh-TW: "寫入暫存檔失敗"
   en: "Failed to write a temporary file"
-err_launch:
-  zh-CN: "无法调用 %{program}"
-  zh-TW: "無法執行 %{program}"
-  en: "Could not run %{program}"
 err_auth_failed:
   zh-CN: "授权失败"
   zh-TW: "授權失敗"
