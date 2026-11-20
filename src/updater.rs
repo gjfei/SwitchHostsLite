@@ -2,9 +2,10 @@
 //!
 //! Every release carries a `latest.json` manifest naming one package per
 //! platform with its size and SHA-256 (see `.github/workflows/release.yml`).
-//! An update downloads that package and verifies it, installs it over the
-//! running app (a `.app` bundle on macOS, the `-setup.exe` installer on
-//! Windows) and restarts.
+//! An update downloads that package and verifies it, then waits for the user:
+//! Windows installs the `-setup.exe` over the running app and restarts on
+//! click, macOS saves the disk image into a folder the user picked and leaves
+//! the installation to them.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -33,6 +34,7 @@ use rust_i18n::t;
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
+use crate::http;
 use crate::i18n::{Localize as _, LocalizedError, error_text};
 use crate::settings::Settings;
 
@@ -41,7 +43,6 @@ const STARTUP_DELAY: Duration = Duration::from_secs(5);
 const CHECK_INTERVAL_SECS: i64 = 24 * 60 * 60;
 /// How often download progress is redrawn.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(60);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const MAX_MANIFEST_BYTES: u64 = 1 << 20;
@@ -81,18 +82,14 @@ fn repo() -> Option<String> {
     parse_repo(configured.unwrap_or(env!("CARGO_PKG_REPOSITORY")))
 }
 
-fn source() -> Option<Source> {
-    // Lets a debug build test updates against a local server.
+/// A debug build can point the check at a local manifest server.
+fn override_source() -> Option<Source> {
     #[cfg(debug_assertions)]
     if let Ok(manifest_url) = std::env::var("SHL_UPDATE_MANIFEST_URL") {
         let page_url = repo().map_or_else(|| manifest_url.clone(), |repo| release_page(&repo));
         return Some(Source { manifest_url, page_url });
     }
-    let repo = repo()?;
-    Some(Source {
-        manifest_url: format!("https://github.com/{repo}/releases/latest/download/latest.json"),
-        page_url: release_page(&repo),
-    })
+    None
 }
 
 fn release_page(repo: &str) -> String {
@@ -101,7 +98,51 @@ fn release_page(repo: &str) -> String {
 
 /// Whether this build knows where to look for updates.
 pub fn is_configured() -> bool {
-    source().is_some()
+    override_source().is_some() || repo().is_some()
+}
+
+/// Resolve the newest release's manifest, pre-releases included:
+/// `releases/latest` skips them, so test builds would never see an update.
+/// The API is rate-limited for anonymous callers, so a failure falls back to
+/// github.com's own release pages.
+fn resolve_source() -> Result<Source> {
+    if let Some(source) = override_source() {
+        return Ok(source);
+    }
+    let Some(repo) = repo() else {
+        return Err(LocalizedError::new("update_not_configured").into());
+    };
+    api_source(&repo).or_else(|_| web_source(&repo))
+}
+
+fn api_source(repo: &str) -> Result<Source> {
+    let url = format!("https://api.github.com/repos/{repo}/releases?per_page=20");
+    let text = get_text(&url)?;
+    let entries: Vec<ReleaseEntry> = serde_json::from_str(&text).localize("err_update_releases")?;
+    newest_release(&entries).ok_or_else(|| LocalizedError::new("err_update_releases").into())
+}
+
+/// The Atom feed and a release's asset fragment are ordinary web pages, so
+/// they do not share the API's anonymous rate limit.
+fn web_source(repo: &str) -> Result<Source> {
+    let feed = get_text(&format!("https://github.com/{repo}/releases.atom"))?;
+    let tags = atom_tags(&feed);
+    let tag = newest_tag(&tags).ok_or_else(|| LocalizedError::new("err_update_releases"))?;
+    let html = get_text(&format!("https://github.com/{repo}/releases/expanded_assets/{tag}"))?;
+    let manifest_url =
+        expanded_manifest_url(&html, tag).ok_or_else(|| LocalizedError::new("err_update_releases"))?;
+    Ok(Source {
+        manifest_url,
+        page_url: format!("https://github.com/{repo}/releases/tag/{tag}"),
+    })
+}
+
+fn get_text(url: &str) -> Result<String> {
+    let mut body = http::get(url, MANIFEST_TIMEOUT, MAX_MANIFEST_BYTES).localize("err_network")?;
+    let mut text = String::new();
+    body.read_to_string(&mut text).localize("err_network")?;
+    body.finish().localize("err_network")?;
+    Ok(text)
 }
 
 /// Key of this platform's archive in the manifest, such as `macos-aarch64`.
@@ -208,13 +249,108 @@ fn select_asset(manifest: &Manifest, key: &str) -> Option<Asset> {
     (checksum_ok && url_ok && asset.size > 0).then(|| asset.clone())
 }
 
+/// macOS installs by hand from a disk image; manifests older than that flow
+/// only carry the zip, which unpacks just as well.
+fn update_asset(manifest: &Manifest, key: &str) -> Option<Asset> {
+    #[cfg(target_os = "macos")]
+    if let Some(dmg) = select_asset(manifest, &format!("{key}-dmg")) {
+        return Some(dmg);
+    }
+    select_asset(manifest, key)
+}
+
+/// One entry of the GitHub release list.
+#[derive(Debug, Deserialize)]
+struct ReleaseEntry {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    assets: Vec<EntryAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EntryAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// The highest-versioned published release carrying a `latest.json`; drafts,
+/// unparsable tags and releases without the manifest are skipped.
+fn newest_release(entries: &[ReleaseEntry]) -> Option<Source> {
+    let mut best: Option<(&ReleaseEntry, &str)> = None;
+    for entry in entries {
+        if entry.draft || parse_version(&entry.tag_name).is_none() {
+            continue;
+        }
+        let Some(asset) = entry.assets.iter().find(|asset| asset.name == "latest.json") else {
+            continue;
+        };
+        if best.is_none_or(|(best, _)| is_newer(&entry.tag_name, &best.tag_name)) {
+            best = Some((entry, &asset.browser_download_url));
+        }
+    }
+    best.map(|(entry, url)| Source {
+        manifest_url: url.to_string(),
+        page_url: entry.html_url.clone(),
+    })
+}
+
+/// Release tags linked by the Atom feed, in feed order.
+fn atom_tags(feed: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let mut rest = feed;
+    while let Some(at) = rest.find("/releases/tag/") {
+        rest = &rest[at + "/releases/tag/".len()..];
+        let end = rest.find('"').unwrap_or(rest.len());
+        let tag = &rest[..end];
+        if parse_version(tag).is_some() && !tags.iter().any(|t| t == tag) {
+            tags.push(tag.to_string());
+        }
+        rest = &rest[end..];
+    }
+    tags
+}
+
+fn newest_tag(tags: &[String]) -> Option<&String> {
+    tags.iter().reduce(|best, tag| if is_newer(tag, best) { tag } else { best })
+}
+
+/// The `latest.json` link inside a release's expanded-assets fragment, whose
+/// hrefs are root-relative.
+fn expanded_manifest_url(html: &str, tag: &str) -> Option<String> {
+    let needle = format!("/releases/download/{tag}/latest.json");
+    let at = html.find(&needle)?;
+    let start = html[..at].rfind('"')? + 1;
+    let url = &html[start..at + needle.len()];
+    if url.starts_with('/') {
+        Some(format!("https://github.com{url}"))
+    } else if url.starts_with("https://github.com/") {
+        Some(url.to_string())
+    } else {
+        None
+    }
+}
+
+/// Whether the version carries a pre-release part such as `-beta.1`.
+fn is_pre(version: &str) -> bool {
+    parse_version(version).is_some_and(|(_, pre)| pre.is_some())
+}
+
+/// A stable build moving to a pre-release confirms once before downloading;
+/// every other combination downloads directly.
+fn needs_confirm(current: &str, target: &str) -> bool {
+    parse_version(current).is_some_and(|(_, pre)| pre.is_none()) && is_pre(target)
+}
+
 /// The release in `manifest` when it is newer than `current`.
 fn evaluate(manifest: Manifest, current: &str, key: &str) -> Option<Release> {
     if !is_newer(&manifest.version, current) {
         return None;
     }
     Some(Release {
-        asset: select_asset(&manifest, key),
+        asset: update_asset(&manifest, key),
         version: manifest.version.trim().trim_start_matches('v').to_string(),
         notes: truncate_notes(manifest.notes.trim(), MAX_NOTES_CHARS),
     })
@@ -232,98 +368,6 @@ fn due(last_check: Option<i64>, now: i64) -> bool {
 }
 
 // -- network -------------------------------------------------------------------
-
-const USER_AGENT: &str = concat!("SwitchHostsLite/", env!("CARGO_PKG_VERSION"));
-
-/// HTTP(S) GET through the curl that ships with macOS and Windows 10+, which
-/// keeps a TLS stack out of the binary.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-mod http {
-    use std::io::{self, Read};
-    use std::process::{Child, ChildStdout, Command, Stdio};
-    use std::time::Duration;
-
-    /// A response body streamed from curl's stdout.
-    pub struct Body {
-        child: Child,
-        stdout: ChildStdout,
-        received: u64,
-        max_len: u64,
-    }
-
-    #[cfg(target_os = "macos")]
-    fn curl() -> Command {
-        Command::new("/usr/bin/curl")
-    }
-
-    #[cfg(target_os = "windows")]
-    fn curl() -> Command {
-        let system = std::env::var_os("SystemRoot")
-            .map(|root| std::path::PathBuf::from(root).join("System32").join("curl.exe"))
-            .filter(|curl| curl.is_file());
-        super::hidden_command(system.as_deref().unwrap_or("curl.exe".as_ref()))
-    }
-
-    /// Start a GET of `url` that fails on an HTTP error status, after
-    /// `timeout` or when the body is longer than `max_len`.
-    pub fn get(url: &str, timeout: Duration, max_len: u64) -> io::Result<Body> {
-        let mut child = curl()
-            // Must come first: ignores the user's .curlrc.
-            .arg("--disable")
-            .args(["--silent", "--show-error", "--fail", "--location", "--max-redirs", "10"])
-            .args(["--proto", "=http,https", "--proto-redir", "=http,https"])
-            .arg("--connect-timeout")
-            .arg(super::CONNECT_TIMEOUT.as_secs().to_string())
-            .arg("--max-time")
-            .arg(timeout.as_secs().to_string())
-            .arg("--max-filesize")
-            .arg(max_len.to_string())
-            .arg("--user-agent")
-            .arg(super::USER_AGENT)
-            .arg("--url")
-            .arg(url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|err| io::Error::new(err.kind(), format!("curl: {err}")))?;
-        let stdout = child.stdout.take().expect("piped stdout");
-        Ok(Body { child, stdout, received: 0, max_len })
-    }
-
-    impl Read for Body {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let n = self.stdout.read(buf)?;
-            self.received += n as u64;
-            if self.received > self.max_len {
-                return Err(io::Error::other(format!("response longer than {} bytes", self.max_len)));
-            }
-            Ok(n)
-        }
-    }
-
-    impl Body {
-        /// Once the body was read to the end: curl's error if the transfer failed.
-        pub fn finish(mut self) -> io::Result<()> {
-            let mut stderr = String::new();
-            if let Some(mut pipe) = self.child.stderr.take() {
-                let _ = pipe.read_to_string(&mut stderr);
-            }
-            let status = self.child.wait()?;
-            if status.success() {
-                return Ok(());
-            }
-            Err(io::Error::other(format!("curl: {status} {}", stderr.trim())))
-        }
-    }
-
-    impl Drop for Body {
-        fn drop(&mut self) {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-    }
-}
 
 fn fetch_manifest(url: &str) -> Result<Manifest> {
     let mut body = http::get(url, MANIFEST_TIMEOUT, MAX_MANIFEST_BYTES).localize("err_network")?;
@@ -399,6 +443,7 @@ fn url_file_name(url: &str) -> String {
 
 // -- installing ----------------------------------------------------------------
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn run(command: &mut Command, key: &'static str) -> Result<()> {
     let program = command.get_program().to_string_lossy().into_owned();
     let output = command
@@ -414,6 +459,7 @@ fn run(command: &mut Command, key: &'static str) -> Result<()> {
 }
 
 /// Whether files can be created in `dir`.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_writable(dir: &Path) -> bool {
     let probe = dir.join(format!(".switch-hosts-lite-write-test-{}", std::process::id()));
     let writable = fs::File::create(&probe).is_ok();
@@ -422,6 +468,7 @@ fn is_writable(dir: &Path) -> bool {
 }
 
 /// The first entry in `dir`, or one level below it, matching `pred`.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn find_entry(dir: &Path, pred: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
     let entries: Vec<PathBuf> = fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).collect();
     if let Some(found) = entries.iter().find(|p| pred(p)) {
@@ -483,132 +530,8 @@ fn remove_leftovers() {
     }
 }
 
-/// The `.app` bundle of an executable at `X.app/Contents/MacOS/<bin>`.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn bundle_root(exe: &Path) -> Option<PathBuf> {
-    let macos = exe.parent()?;
-    let contents = macos.parent()?;
-    let bundle = contents.parent()?;
-    let is_app = bundle.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("app"));
-    (macos.file_name()? == "MacOS" && contents.file_name()? == "Contents" && is_app).then(|| bundle.to_path_buf())
-}
-
-/// A `/bin/sh` command that waits for this process to exit, then runs
-/// `script` with the given path as `$0`.
-#[cfg(target_os = "macos")]
-fn relaunch_command(script: &str, path: &Path) -> Command {
-    use std::os::unix::process::CommandExt as _;
-    let wait = "i=0; while kill -0 \"$1\" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done";
-    let mut command = Command::new("/bin/sh");
-    command
-        .arg("-c")
-        .arg(format!("{wait}; {script}"))
-        .arg(path)
-        .arg(std::process::id().to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0);
-    command
-}
-
-#[cfg(target_os = "macos")]
-fn plist_version(plist: &Path) -> Option<String> {
-    let output = Command::new("/usr/libexec/PlistBuddy")
-        .args(["-c", "Print :CFBundleShortVersionString"])
-        .arg(plist)
-        .output()
-        .ok()?;
-    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-/// `'…'`-quote for `/bin/sh`.
-#[cfg(target_os = "macos")]
-fn sh_quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
-}
-
-/// Unpack the archive and put its app in place of `bundle`.
-#[cfg(target_os = "macos")]
-fn install_macos(archive: &Path, work: &Path, bundle: &Path, version: &str) -> Result<()> {
-    let staging = work.join("extract");
-    let _ = fs::remove_dir_all(&staging);
-    fs::create_dir_all(&staging).localize("err_update_extract")?;
-    run(
-        Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(archive).arg(&staging),
-        "err_update_extract",
-    )?;
-    let is_app = |p: &Path| p.is_dir() && p.extension().is_some_and(|ext| ext == "app");
-    let new_app = find_entry(&staging, &is_app).ok_or_else(|| LocalizedError::new("err_update_invalid_package"))?;
-    let found = plist_version(&new_app.join("Contents/Info.plist"));
-    if found.as_deref() != Some(version) || !new_app.join("Contents/MacOS").is_dir() {
-        let detail = format!("version {}, expected {version}", found.as_deref().unwrap_or("?"));
-        return Err(LocalizedError::new("err_update_invalid_package").detail(detail).into());
-    }
-    let _ = Command::new("/usr/bin/xattr")
-        .args(["-dr", "com.apple.quarantine"])
-        .arg(&new_app)
-        .output();
-    replace_bundle(&new_app, bundle)
-}
-
-#[cfg(target_os = "macos")]
-fn replace_bundle(new_app: &Path, bundle: &Path) -> Result<()> {
-    let parent = bundle.parent().ok_or_else(|| LocalizedError::new("err_update_install"))?;
-    let backup = with_suffix(bundle, ".update-backup");
-    if is_writable(parent) {
-        let _ = fs::remove_dir_all(&backup);
-        fs::rename(bundle, &backup).localize("err_update_install")?;
-        let moved = fs::rename(new_app, bundle)
-            .or_else(|_| run(Command::new("/usr/bin/ditto").arg(new_app).arg(bundle), "err_update_install").map_err(std::io::Error::other));
-        if let Err(err) = moved {
-            let _ = fs::remove_dir_all(bundle);
-            let _ = fs::rename(&backup, bundle);
-            return Err(err).localize("err_update_install");
-        }
-        let _ = fs::remove_dir_all(&backup);
-        return Ok(());
-    }
-
-    // Such as /Applications for a standard user: ask for an admin password.
-    let (cur, bak, new) = (sh_quote(bundle), sh_quote(&backup), sh_quote(new_app));
-    let shell = format!(
-        "rm -rf {bak} && mv {cur} {bak} && if /usr/bin/ditto {new} {cur}; then rm -rf {bak}; \
-         else rm -rf {cur}; mv {bak} {cur}; exit 1; fi"
-    );
-    let script = format!(
-        "do shell script \"{}\" with administrator privileges",
-        shell.replace('\\', "\\\\").replace('"', "\\\"")
-    );
-    let output = Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map_err(|err| LocalizedError::new("err_launch").arg("program", "osascript").detail(err))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // -128 is userCanceledErr, the password prompt was dismissed.
-        let key = if stderr.contains("(-128)") { "err_auth_cancelled" } else { "err_update_install" };
-        return Err(LocalizedError::new(key).detail(stderr.trim()).into());
-    }
-    Ok(())
-}
-
 /// Install the downloaded archive over the running app and return the
 /// command that starts the new version.
-#[cfg(target_os = "macos")]
-fn install(archive: &Path, work: &Path, version: &str) -> Result<Command> {
-    let exe = std::env::current_exe().localize("err_update_install")?;
-    let bundle = bundle_root(&exe).ok_or_else(|| LocalizedError::new("err_update_dev_build"))?;
-    // Gatekeeper runs quarantined apps from a read-only copy.
-    if bundle.to_string_lossy().contains("/AppTranslocation/") {
-        return Err(LocalizedError::new("err_update_translocated").into());
-    }
-    install_macos(archive, work, &bundle, version)?;
-    let _ = fs::remove_dir_all(work);
-    Ok(relaunch_command("open \"$0\"", &bundle))
-}
-
 #[cfg(target_os = "windows")]
 fn install(archive: &Path, work: &Path, _version: &str) -> Result<Command> {
     let exe = std::env::current_exe().localize("err_update_install")?;
@@ -814,6 +737,7 @@ fn remove_stale_update_dirs() {
 #[derive(Default)]
 struct UpdateState {
     checking: bool,
+    confirming: bool,
     job: Option<Job>,
 }
 
@@ -824,17 +748,34 @@ struct Job {
     total: u64,
     cancel: Arc<AtomicBool>,
     phase: Phase,
+    archive: PathBuf,
+    /// Scratch directory holding the archive; `None` when it was saved
+    /// straight into the folder the user picked on macOS.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    work: Option<PathBuf>,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    version: String,
 }
 
 enum Phase {
     Downloading,
+    /// Downloaded and verified, waiting for the user's install/reveal click.
+    Ready,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Installing,
     Failed(String),
 }
 
+impl Job {
+    /// A finished download only counts while its package is still on disk.
+    fn ready(&self) -> bool {
+        matches!(self.phase, Phase::Ready) && self.archive.exists()
+    }
+}
+
 impl UpdateState {
     fn busy(&self) -> bool {
-        matches!(&self.job, Some(job) if !matches!(job.phase, Phase::Failed(_)))
+        matches!(&self.job, Some(job) if matches!(job.phase, Phase::Downloading | Phase::Installing))
     }
 }
 
@@ -877,12 +818,12 @@ pub fn init(cx: &mut App) {
 /// Look for a newer release. A manual check reports every outcome; an
 /// automatic one only a found update.
 pub fn check(manual: bool, cx: &mut App) {
-    let Some(source) = source() else {
+    if !is_configured() {
         if manual {
             notify(Notification::warning(t!("update_not_configured")), cx);
         }
         return;
-    };
+    }
     let state = cx.default_global::<UpdateState>();
     if state.checking || state.busy() {
         return;
@@ -893,18 +834,24 @@ pub fn check(manual: bool, cx: &mut App) {
         notify(Notification::info(t!("update_checking")), cx);
     }
 
-    let url = source.manifest_url.clone();
     cx.spawn(async move |cx| {
-        let result = cx.background_executor().spawn(async move { fetch_manifest(&url) }).await;
+        let result = cx
+            .background_executor()
+            .spawn(async move {
+                let source = resolve_source()?;
+                let manifest = fetch_manifest(&source.manifest_url)?;
+                anyhow::Ok((source, manifest))
+            })
+            .await;
         cx.update(|cx| {
             cx.default_global::<UpdateState>().checking = false;
-            match result.map(|manifest| evaluate(manifest, CURRENT_VERSION, &platform_key())) {
-                Ok(Some(release)) if manual => open_dialog(Rc::new(release), source, cx),
-                Ok(Some(release)) => notify_available(Rc::new(release), source, cx),
-                Ok(None) if manual => {
+            match result.map(|(source, manifest)| (source, evaluate(manifest, CURRENT_VERSION, &platform_key()))) {
+                Ok((source, Some(release))) if manual => open_dialog(Rc::new(release), source, cx),
+                Ok((source, Some(release))) => notify_available(Rc::new(release), source, cx),
+                Ok((_, None)) if manual => {
                     notify(Notification::success(t!("up_to_date", version = CURRENT_VERSION)), cx);
                 }
-                Ok(None) => {}
+                Ok((_, None)) => {}
                 Err(err) if manual => {
                     notify(Notification::error(t!("update_check_failed", error = error_text(&err))), cx);
                 }
@@ -948,13 +895,25 @@ fn open_dialog(release: Rc<Release>, source: Source, cx: &mut App) {
     if cx.default_global::<UpdateState>().job.as_ref().is_some_and(|job| matches!(job.phase, Phase::Failed(_))) {
         cx.global_mut::<UpdateState>().job = None;
     }
+    cx.default_global::<UpdateState>().confirming = false;
     with_window(cx, move |window, cx| {
         window.open_dialog(cx, move |dialog, _, cx| {
             let theme = cx.theme();
-            let (muted, muted_bg, border, danger) = (theme.muted_foreground, theme.muted, theme.border, theme.danger);
+            let (muted, muted_bg, border, danger, warning, success) = (
+                theme.muted_foreground,
+                theme.muted,
+                theme.border,
+                theme.danger,
+                theme.warning,
+                theme.success,
+            );
             let state = cx.global::<UpdateState>();
             let busy = state.busy();
-            let status = match &state.job {
+            let confirming = state.confirming;
+            let ask_confirm = needs_confirm(CURRENT_VERSION, &release.version);
+            // A job left over from an older release is not this dialog's download.
+            let job = state.job.as_ref().filter(|job| job.version == release.version);
+            let status = match job {
                 Some(job) => match &job.phase {
                     Phase::Downloading => {
                         let done = job.downloaded.load(Ordering::Relaxed);
@@ -969,6 +928,24 @@ fn open_dialog(release: Rc<Release>, source: Source, cx: &mut App) {
                         .gap_1()
                         .child(Progress::new("update-progress").loading(true))
                         .child(div().text_xs().text_color(muted).child(t!("update_installing"))),
+                    Phase::Ready => {
+                        if job.ready() {
+                            let name = job.archive.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(success)
+                                        .child(t!("update_downloaded", name = name)),
+                                )
+                                .when(cfg!(target_os = "macos"), |this| {
+                                    this.child(div().text_xs().text_color(muted).child(t!("update_manual_hint")))
+                                })
+                        } else {
+                            v_flex().text_sm().text_color(muted).child(t!("update_package_gone"))
+                        }
+                    }
                     Phase::Failed(message) => v_flex()
                         .text_sm()
                         .text_color(danger)
@@ -988,6 +965,25 @@ fn open_dialog(release: Rc<Release>, source: Source, cx: &mut App) {
 
             let page_url = source.page_url.clone();
             let update_release = release.clone();
+            let ready = job.is_some_and(Job::ready);
+            let ready_button = {
+                #[cfg(target_os = "macos")]
+                {
+                    Button::new("update-ready")
+                        .primary()
+                        .label(t!("update_reveal"))
+                        .cursor_pointer()
+                        .on_click(|_, _, cx| reveal_ready(cx))
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Button::new("update-ready")
+                        .primary()
+                        .label(t!("update_restart"))
+                        .cursor_pointer()
+                        .on_click(|_, _, cx| install_ready(cx))
+                }
+            };
             let footer = h_flex()
                 .w_full()
                 .justify_between()
@@ -1002,25 +998,37 @@ fn open_dialog(release: Rc<Release>, source: Source, cx: &mut App) {
                         .gap_2()
                         .child(Button::new("update-later").label(t!("update_later")).cursor_pointer().on_click(
                             |_, window, cx| {
+                                cx.default_global::<UpdateState>().confirming = false;
                                 dismiss_job(cx);
                                 window.close_dialog(cx);
                             },
                         ))
-                        .child(
+                        .child(if ready {
+                            ready_button
+                        } else {
                             Button::new("update-now")
                                 .primary()
-                                .label(t!("update_now"))
+                                .label(if confirming { t!("update_anyway") } else { t!("update_now") })
                                 .loading(busy)
                                 .disabled(busy || release.asset.is_none())
                                 .when(!busy && release.asset.is_some(), |this| this.cursor_pointer())
-                                .on_click(move |_, _, cx| start_update(update_release.clone(), cx)),
-                        ),
+                                .on_click(move |_, _, cx| {
+                                    if ask_confirm && !cx.default_global::<UpdateState>().confirming {
+                                        cx.default_global::<UpdateState>().confirming = true;
+                                        cx.refresh_windows();
+                                    } else {
+                                        cx.default_global::<UpdateState>().confirming = false;
+                                        begin_update(update_release.clone(), cx);
+                                    }
+                                })
+                        }),
                 );
 
             dialog
                 .title(t!("update_available", version = release.version))
                 .w(px(480.))
                 .on_cancel(|_, _, cx| {
+                    cx.default_global::<UpdateState>().confirming = false;
                     dismiss_job(cx);
                     true
                 })
@@ -1031,6 +1039,14 @@ fn open_dialog(release: Rc<Release>, source: Source, cx: &mut App) {
                             "update_current_version",
                             version = CURRENT_VERSION
                         )))
+                        .when(confirming, |this| {
+                            this.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(warning)
+                                    .child(t!("update_beta_warning", version = release.version.clone())),
+                            )
+                        })
                         .child(
                             div()
                                 .id("update-notes")
@@ -1065,10 +1081,30 @@ fn fail(err: anyhow::Error, cx: &mut App) {
         return;
     }
     let message = error_text(&err);
-    set_phase(Phase::Failed(message), cx);
+    set_phase(Phase::Failed(message.clone()), cx);
+    notify(Notification::error(t!("update_failed", error = message)), cx);
 }
 
-fn start_update(release: Rc<Release>, cx: &mut App) {
+/// macOS first asks where to save the package; Windows downloads straight
+/// into its scratch directory.
+fn begin_update(release: Rc<Release>, cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    {
+        let prompt = t!("update_folder_prompt").to_string();
+        let picked = crate::platform::prompt_for_directory(&prompt);
+        cx.spawn(async move |cx| {
+            let Some(dir) = picked.await else {
+                return;
+            };
+            cx.update(|cx| start_update(release, Some(dir), cx));
+        })
+        .detach();
+    }
+    #[cfg(not(target_os = "macos"))]
+    start_update(release, None, cx);
+}
+
+fn start_update(release: Rc<Release>, dir: Option<PathBuf>, cx: &mut App) {
     let Some(asset) = release.asset.clone() else {
         return;
     };
@@ -1076,6 +1112,25 @@ fn start_update(release: Rc<Release>, cx: &mut App) {
     if state.busy() {
         return;
     }
+    let (work, archive, dest) = match dir {
+        Some(dir) => {
+            let archive = dir.join(url_file_name(&asset.url));
+            // Stage beside the target: a cancelled run must not truncate or
+            // delete a same-named package the user already had there.
+            let dest = dir.join(format!(".{}.part", url_file_name(&asset.url)));
+            (None, archive, dest)
+        }
+        None => match work_dir(&release.version) {
+            Ok(work) => {
+                let archive = work.join(url_file_name(&asset.url));
+                (Some(work), archive.clone(), archive)
+            }
+            Err(err) => {
+                notify(Notification::error(t!("update_failed", error = error_text(&err))), cx);
+                return;
+            }
+        },
+    };
     let downloaded = Arc::new(AtomicU64::new(0));
     let cancel = Arc::new(AtomicBool::new(false));
     state.job = Some(Job {
@@ -1083,6 +1138,9 @@ fn start_update(release: Rc<Release>, cx: &mut App) {
         total: asset.size,
         cancel: cancel.clone(),
         phase: Phase::Downloading,
+        archive: archive.clone(),
+        work: work.clone(),
+        version: release.version.clone(),
     });
     cx.refresh_windows();
 
@@ -1091,44 +1149,113 @@ fn start_update(release: Rc<Release>, cx: &mut App) {
     cx.spawn(async move |cx| {
         while !poll_finished.load(Ordering::Relaxed) {
             cx.background_executor().timer(PROGRESS_INTERVAL).await;
+            // Only redraw the dialog: a same-id notification push recreates the
+            // toast and replays its entrance animation, so per-tick progress
+            // pushes would keep re-popping it.
             cx.update(|cx| cx.refresh_windows());
         }
     })
     .detach();
 
-    let version = release.version.clone();
     cx.spawn(async move |cx| {
-        let downloaded_archive = cx
+        let target = dest.clone();
+        let result = cx
             .background_executor()
-            .spawn(async move {
-                let work = work_dir(&version)?;
-                let archive = work.join(url_file_name(&asset.url));
-                download(&asset, &archive, &downloaded, &cancel)?;
-                anyhow::Ok((work, archive, version))
-            })
+            .spawn(async move { download(&asset, &target, &downloaded, &cancel) })
             .await;
-        let (work, archive, version) = match downloaded_archive {
-            Ok(downloaded) => downloaded,
-            Err(err) => {
-                finished.store(true, Ordering::Relaxed);
-                cx.update(|cx| fail(err, cx));
-                return;
+        finished.store(true, Ordering::Relaxed);
+        if let Err(err) = result {
+            // A half-written package in the user's own folder is litter.
+            if work.is_none() {
+                let _ = fs::remove_file(&dest);
             }
-        };
-        cx.update(|cx| set_phase(Phase::Installing, cx));
+            cx.update(|cx| fail(err, cx));
+            return;
+        }
+        if work.is_none()
+            && let Err(err) = fs::rename(&dest, &archive).localize("err_update_install")
+        {
+            let _ = fs::remove_file(&dest);
+            cx.update(|cx| fail(err, cx));
+            return;
+        }
+        cx.update(|cx| {
+            set_phase(Phase::Ready, cx);
+            notify_ready(cx);
+        });
+    })
+    .detach();
+}
+
+/// The package was moved or deleted after the download: drop the job so the
+/// dialog offers a fresh download, and replace the stale success notification.
+fn forget_stale_package(cx: &mut App) {
+    cx.default_global::<UpdateState>().job = None;
+    cx.refresh_windows();
+    // Close the stale success note first, so the loss hint is what shows
+    // instead of the old completion action.
+    with_window(cx, |window, cx| {
+        window.remove_notification::<UpdateState>(cx);
+        window.push_notification(Notification::info(t!("update_package_gone")).id::<UpdateState>(), cx);
+    });
+}
+
+/// The download finished: offer the one click that completes the update.
+fn notify_ready(cx: &mut App) {
+    let Some(job) = &cx.default_global::<UpdateState>().job else {
+        return;
+    };
+    let name = job.archive.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let note = Notification::success(t!("update_downloaded", name = name));
+    #[cfg(target_os = "macos")]
+    let note = note.action(move |_, _, _| {
+        Button::new("update-reveal")
+            .primary()
+            .label(t!("update_reveal"))
+            .cursor_pointer()
+            .on_click(move |_, _, cx| reveal_ready(cx))
+    });
+    #[cfg(not(target_os = "macos"))]
+    let note = note.action(move |_, _, _| {
+        Button::new("update-restart")
+            .primary()
+            .label(t!("update_restart"))
+            .cursor_pointer()
+            .on_click(move |_, _, cx| install_ready(cx))
+    });
+    notify(note, cx);
+}
+
+/// Windows: install the verified package and restart, on the user's click.
+#[cfg(not(target_os = "macos"))]
+fn install_ready(cx: &mut App) {
+    let state = cx.default_global::<UpdateState>();
+    let Some(job) = &state.job else {
+        return;
+    };
+    if !matches!(job.phase, Phase::Ready) {
+        return;
+    }
+    let (archive, version) = (job.archive.clone(), job.version.clone());
+    if !archive.exists() {
+        forget_stale_package(cx);
+        return;
+    }
+    let Some(work) = job.work.clone() else {
+        return;
+    };
+    set_phase(Phase::Installing, cx);
+    cx.spawn(async move |cx| {
         let installed = cx
             .background_executor()
             .spawn(async move {
                 let relaunch = install(&archive, &work, &version);
-                // A successful install removes its own work directory; the
-                // Windows helper needs it to hold the installer until it runs.
                 if relaunch.is_err() {
                     let _ = fs::remove_dir_all(&work);
                 }
                 relaunch
             })
             .await;
-        finished.store(true, Ordering::Relaxed);
         cx.update(|cx| match installed {
             Ok(relaunch) => restart(relaunch, cx),
             Err(err) => fail(err, cx),
@@ -1137,8 +1264,26 @@ fn start_update(release: Rc<Release>, cx: &mut App) {
     .detach();
 }
 
+/// macOS: show the saved package in Finder; installing it is the user's job.
+#[cfg(target_os = "macos")]
+fn reveal_ready(cx: &mut App) {
+    let Some(job) = &cx.default_global::<UpdateState>().job else {
+        return;
+    };
+    if !matches!(job.phase, Phase::Ready) {
+        return;
+    }
+    let archive = job.archive.clone();
+    if !archive.exists() {
+        forget_stale_package(cx);
+        return;
+    }
+    let _ = Command::new("/usr/bin/open").arg("-R").arg(&archive).spawn();
+}
+
 /// Start the installed version and quit this one through the app's own quit
 /// path, which writes out pending state.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn restart(mut relaunch: Command, cx: &mut App) {
     if let Err(err) = relaunch.spawn() {
         let err = LocalizedError::new("err_update_relaunch").detail(err);
@@ -1173,6 +1318,55 @@ mod tests {
         assert!(!is_newer("1.0.0-", "0.1.0"));
         assert!(!is_newer("latest", "0.1.0"));
         assert_eq!(parse_version("v1.2.3-rc.1+x"), Some(([1, 2, 3], Some("rc.1"))));
+    }
+
+    #[test]
+    fn only_stable_to_pre_release_confirms() {
+        assert!(needs_confirm("0.0.2", "0.0.3-beta.1"));
+        assert!(!needs_confirm("0.0.3-beta.1", "0.0.3-beta.2"));
+        assert!(!needs_confirm("0.0.3-beta.1", "0.0.3"));
+        assert!(!needs_confirm("0.0.2", "0.0.3"));
+        assert!(!needs_confirm("latest", "0.0.3-beta.1"));
+        assert!(!needs_confirm("0.0.2", "latest"));
+    }
+
+    #[test]
+    fn newest_release_includes_pre_releases_and_skips_drafts() {
+        let entries: Vec<ReleaseEntry> = serde_json::from_str(
+            r#"[
+              {"tag_name": "v0.0.2", "html_url": "https://x/0.0.2",
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/0.0.2.json"}]},
+              {"tag_name": "v0.0.3-beta.4", "html_url": "https://x/b4",
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/b4.json"}]},
+              {"tag_name": "v0.0.3-beta.5", "html_url": "https://x/b5",
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/b5.json"}]},
+              {"tag_name": "v0.0.4-beta.1", "html_url": "https://x/draft", "draft": true,
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/draft.json"}]},
+              {"tag_name": "v0.0.9", "html_url": "https://x/no-manifest", "assets": []},
+              {"tag_name": "next", "html_url": "https://x/bad-tag",
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/bad.json"}]}
+            ]"#,
+        )
+        .unwrap();
+        let source = newest_release(&entries).unwrap();
+        assert_eq!(source.manifest_url, "https://x/b5.json");
+        assert_eq!(source.page_url, "https://x/b5");
+        assert!(newest_release(&[]).is_none());
+    }
+
+    #[test]
+    fn newest_release_prefers_a_stable_above_older_betas() {
+        let entries: Vec<ReleaseEntry> = serde_json::from_str(
+            r#"[
+              {"tag_name": "v0.0.3-beta.4", "html_url": "https://x/b4",
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/b4.json"}]},
+              {"tag_name": "v0.0.3", "html_url": "https://x/0.0.3",
+               "assets": [{"name": "latest.json", "browser_download_url": "https://x/0.0.3.json"}]}
+            ]"#,
+        )
+        .unwrap();
+        let source = newest_release(&entries).unwrap();
+        assert_eq!(source.manifest_url, "https://x/0.0.3.json");
     }
 
     #[test]
@@ -1236,15 +1430,6 @@ mod tests {
     }
 
     #[test]
-    fn finds_bundle_root() {
-        let exe = Path::new("/Applications/SwitchHosts Lite.app/Contents/MacOS/switch-hosts-lite");
-        assert_eq!(bundle_root(exe), Some(PathBuf::from("/Applications/SwitchHosts Lite.app")));
-        assert_eq!(bundle_root(Path::new("/repo/target/debug/switch-hosts-lite")), None);
-        assert_eq!(bundle_root(Path::new("/x/Foo/Contents/MacOS/bin")), None);
-        assert_eq!(bundle_root(Path::new("/x/Foo.app/Contents/Resources/bin")), None);
-    }
-
-    #[test]
     fn detects_placeholder_repository() {
         assert_eq!(parse_repo("https://github.com/OWNER/SwitchHostsLite"), None);
         assert_eq!(parse_repo("https://github.com/jarven/SwitchHostsLite"), Some("jarven/SwitchHostsLite".into()));
@@ -1292,36 +1477,27 @@ mod tests {
         assert_eq!(with_suffix(Path::new("/a/b.exe"), ".old"), PathBuf::from("/a/b.exe.old"));
     }
 
-    /// Updates an app bundle from a local release, by hand:
-    /// `SHL_TEST_MANIFEST_URL=http://127.0.0.1:8765/latest.json SHL_TEST_BUNDLE=/tmp/x/App.app
+    /// Downloads a release package into a folder by hand:
+    /// `SHL_TEST_MANIFEST_URL=http://127.0.0.1:8765/latest.json
     /// cargo test simulate_update -- --ignored`.
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore]
     fn simulate_update() {
         let url = std::env::var("SHL_TEST_MANIFEST_URL").unwrap();
-        let bundle = PathBuf::from(std::env::var("SHL_TEST_BUNDLE").unwrap());
-        let plist = bundle.join("Contents/Info.plist");
-        let before = plist_version(&plist).unwrap();
-        let release = evaluate(fetch_manifest(&url).unwrap(), &before, &platform_key()).expect("a newer release");
+        let release = evaluate(fetch_manifest(&url).unwrap(), "0.0.0", &platform_key()).expect("a newer release");
         let asset = release.asset.expect("an archive for this platform");
 
-        let work = work_dir(&release.version).unwrap();
-        let archive = work.join(url_file_name(&asset.url));
+        let dir = std::env::temp_dir().join(format!("shl-update-folder-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join(url_file_name(&asset.url));
         let progress = AtomicU64::new(0);
         let cancelled = download(&asset, &archive, &progress, &AtomicBool::new(true)).unwrap_err();
         assert!(cancelled.is::<Cancelled>() && !archive.exists());
         download(&asset, &archive, &progress, &AtomicBool::new(false)).unwrap();
         assert_eq!(progress.load(Ordering::Relaxed), asset.size);
-
-        let wrong = install_macos(&archive, &work, &bundle, "99.0.0").unwrap_err();
-        eprintln!("mismatched package refused: {wrong:#}");
-        assert_eq!(plist_version(&plist), Some(before));
-
-        install_macos(&archive, &work, &bundle, &release.version).unwrap();
-        assert_eq!(plist_version(&plist), Some(release.version.clone()));
-        assert!(!with_suffix(&bundle, ".update-backup").exists());
-        let _ = fs::remove_dir_all(&work);
+        assert!(archive.exists());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1339,5 +1515,61 @@ mod tests {
         let found = find_entry(&dir, &|p: &Path| p.file_name().is_some_and(|n| n == "app"));
         assert_eq!(found, Some(exe));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ready_requires_the_package_on_disk() {
+        let dir = std::env::temp_dir().join(format!("shl-ready-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("app.dmg");
+        fs::write(&archive, "pkg").unwrap();
+        let job = Job {
+            downloaded: Arc::new(AtomicU64::new(3)),
+            total: 3,
+            cancel: Arc::new(AtomicBool::new(false)),
+            phase: Phase::Ready,
+            archive: archive.clone(),
+            work: None,
+            version: String::new(),
+        };
+        assert!(job.ready());
+        fs::remove_file(&archive).unwrap();
+        assert!(!job.ready());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn macos_prefers_the_disk_image() {
+        let dmg = "\"macos-aarch64-dmg\": {\"url\": \"https://example.com/a.dmg\", \
+                   \"sha256\": \"ab0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd\", \"size\": 11},";
+        let text = MANIFEST.replace("\"macos-aarch64\":", &format!("{dmg}\n            \"macos-aarch64\":"));
+        let manifest = parse_manifest(&text).unwrap();
+        let asset = update_asset(&manifest, "macos-aarch64").unwrap();
+        if cfg!(target_os = "macos") {
+            assert_eq!(asset.url, "https://example.com/a.dmg");
+        } else {
+            assert_eq!(asset.url, "https://example.com/a.zip");
+        }
+        // Manifests older than the manual flow only carry the zip.
+        let old = parse_manifest(MANIFEST).unwrap();
+        assert_eq!(update_asset(&old, "macos-aarch64").unwrap().url, "https://example.com/a.zip");
+    }
+
+    #[test]
+    fn reads_the_web_fallback_source() {
+        let feed = r#"<feed><entry><link rel="alternate" href="https://github.com/o/r/releases/tag/v0.0.3-beta.5"/></entry><entry><link href="https://github.com/o/r/releases/tag/v0.0.2"/></entry><entry><link href="https://github.com/o/r/releases/tag/notes"/></entry></feed>"#;
+        let tags = atom_tags(feed);
+        assert_eq!(tags, vec!["v0.0.3-beta.5".to_string(), "v0.0.2".to_string()]);
+        assert_eq!(newest_tag(&tags).unwrap().as_str(), "v0.0.3-beta.5");
+        assert_eq!(newest_tag(&[]), None);
+
+        let html = r#"<a href="/o/r/releases/download/v0.0.3-beta.5/latest.json">latest.json</a><a href="/o/r/releases/download/v0.0.3-beta.5/app.zip">zip</a>"#;
+        let expected = "https://github.com/o/r/releases/download/v0.0.3-beta.5/latest.json";
+        assert_eq!(expanded_manifest_url(html, "v0.0.3-beta.5").unwrap(), expected);
+        let absolute = html.replace("href=\"/o/", "href=\"https://github.com/o/");
+        assert_eq!(expanded_manifest_url(&absolute, "v0.0.3-beta.5").unwrap(), expected);
+        let foreign = html.replace("href=\"/o/", "href=\"https://evil.com/o/");
+        assert_eq!(expanded_manifest_url(&foreign, "v0.0.3-beta.5"), None);
+        assert_eq!(expanded_manifest_url(html, "v9.9.9"), None);
     }
 }

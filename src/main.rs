@@ -6,6 +6,7 @@ mod dock;
 mod editor_ops;
 mod highlight;
 mod hosts;
+mod http;
 mod i18n;
 #[cfg(target_os = "macos")]
 mod macos;

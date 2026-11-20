@@ -97,3 +97,53 @@ pub fn prompt_for_image(prompt: &str) -> impl Future<Output = Option<PathBuf>> +
 
     async move { rx.await.ok().flatten() }
 }
+
+/// An open panel limited to directories, starting in Downloads, for the
+/// manual update download. `None` when cancelled or off the main thread.
+pub fn prompt_for_directory(prompt: &str) -> impl Future<Output = Option<PathBuf>> + use<> {
+    use std::cell::Cell;
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::{msg_send, MainThreadMarker};
+    use objc2_app_kit::{NSModalResponse, NSModalResponseOK, NSOpenPanel};
+    use objc2_foundation::{NSString, NSURL};
+
+    let (tx, rx) = futures_channel::oneshot::channel();
+    let sender = Cell::new(Some(tx));
+
+    if MainThreadMarker::new().is_some() {
+        // SAFETY: on the main thread; `openPanel` is typed non-null but AppKit
+        // can return nil when it cannot create the panel, as gpui's own
+        // backend notes.
+        let panel: Option<Retained<NSOpenPanel>> =
+            unsafe { msg_send![objc2::class!(NSOpenPanel), openPanel] };
+        if let Some(panel) = panel {
+            panel.setCanChooseFiles(false);
+            panel.setCanChooseDirectories(true);
+            panel.setAllowsMultipleSelection(false);
+            panel.setCanCreateDirectories(true);
+            panel.setResolvesAliases(false);
+            panel.setPrompt(Some(&NSString::from_str(prompt)));
+            if let Some(downloads) = dirs::download_dir() {
+                let url = NSURL::fileURLWithPath(&NSString::from_str(&downloads.to_string_lossy()));
+                panel.setDirectoryURL(Some(&url));
+            }
+            let handler = RcBlock::new({
+                let panel = panel.clone();
+                move |response: NSModalResponse| {
+                    let Some(tx) = sender.take() else {
+                        return;
+                    };
+                    let picked = (response == NSModalResponseOK)
+                        .then(|| panel.URLs().iter().next().and_then(|url| url.to_file_path()))
+                        .flatten();
+                    let _ = tx.send(picked);
+                }
+            });
+            panel.beginWithCompletionHandler(&handler);
+        }
+    }
+
+    async move { rx.await.ok().flatten() }
+}

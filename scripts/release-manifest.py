@@ -3,16 +3,20 @@
 
 The app's updater downloads latest.json from the latest release and picks the
 file for its platform (`<os>-<arch>`, e.g. macos-aarch64) from `assets`: a
-.zip archive on macOS, the -setup.exe installer on Windows.
+.zip archive on macOS (kept for updaters old enough to install it themselves),
+the -setup.exe installer on Windows. macOS disk images get their own
+`<os>-<arch>-dmg` key, which current macOS updaters download for a manual
+install.
 
 Usage:
   scripts/release-manifest.py --dir DIR --version 1.2.3 --repo owner/name \
       [--tag v1.2.3] [--notes-file notes.md] [--base-url URL]
 
-Updater packages must be named SwitchHostsLite-<version>-<os>-<arch>.zip or
-SwitchHostsLite-<version>-<os>-<arch>-setup.exe; other files (e.g. .dmg) only
-go into SHA256SUMS.txt. --base-url replaces the GitHub download URL, for
-testing against a local server.
+Updater packages must be named SwitchHostsLite-<version>-<os>-<arch>.zip,
+SwitchHostsLite-<version>-<os>-<arch>.dmg or
+SwitchHostsLite-<version>-<os>-<arch>-setup.exe; other files only go into
+SHA256SUMS.txt. --base-url replaces the GitHub download URL, for testing
+against a local server.
 """
 
 import argparse
@@ -46,7 +50,7 @@ def main() -> int:
     base_url = (args.base_url or f"https://github.com/{args.repo}/releases/download/{tag}").rstrip("/")
     notes = args.notes_file.read_text(encoding="utf-8").strip() if args.notes_file else ""
     pattern = re.compile(
-        rf"^SwitchHostsLite-{re.escape(args.version)}-(?P<key>[a-z]+-[a-z0-9_]+?)(?:-setup)?\.(?:zip|exe)$"
+        rf"^SwitchHostsLite-{re.escape(args.version)}-(?P<key>[a-z]+-[a-z0-9_]+?)(?:-setup)?\.(?P<ext>zip|exe|dmg)$"
     )
 
     files = sorted(
@@ -58,6 +62,8 @@ def main() -> int:
         if not match:
             continue
         key = match["key"]
+        if match["ext"] == "dmg":
+            key = f"{key}-dmg"
         if key in assets:
             print(f"error: two packages for {key}", file=sys.stderr)
             return 1
