@@ -29,7 +29,7 @@ sys-locale = "0.3.2"
 # a block.
 block2 = "0.6.2"
 objc2 = "0.6.5"
-objc2-app-kit = "0.3.2"
+objc2-app-kit = { version = "0.3.2", features = ["NSStatusBar", "NSStatusItem", "NSStatusBarButton"] }
 objc2-foundation = "0.3.2"
 objc2-uniform-type-identifiers = "0.3.2"
 
@@ -37,6 +37,9 @@ objc2-uniform-type-identifiers = "0.3.2"
 # Profile icons: the .exe's RT_GROUP_ICON is decoded (PNG or BMP entries) and
 # composited with the letter badge, then written back as a PNG.
 image = "0.25.10"
+# The tray reads the main window's HWND through gpui's HasWindowHandle impl;
+# already in the tree via gpui, so this adds no new copy.
+raw-window-handle = "0.6.2"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

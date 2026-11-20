@@ -6103,6 +6103,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-uniform-type-identifiers",
+ "raw-window-handle",
  "rust-i18n",
  "serde",
  "serde_json",

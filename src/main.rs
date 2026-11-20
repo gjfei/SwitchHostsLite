@@ -17,6 +17,8 @@ mod store;
 mod switchhosts;
 mod themes;
 mod tile;
+#[cfg(any(target_os = "macos", windows))]
+mod tray;
 mod updater;
 #[cfg(windows)]
 mod winicon;
@@ -81,9 +83,11 @@ fn main() {
         updater::run_update_installer_helper();
     }
 
-    gpui_kit::application()
-        .with_assets(AppAssets)
-        .run(|cx| {
+    let application = gpui_kit::application().with_assets(AppAssets);
+    // A hidden app is restored by clicking its Dock icon.
+    #[cfg(target_os = "macos")]
+    application.on_reopen(tray::show);
+    application.run(|cx| {
             // Default on macOS is to keep running with no windows, which leaves the Dock icon.
             #[cfg(target_os = "macos")]
             cx.set_quit_mode(QuitMode::LastWindowClosed);
@@ -129,15 +133,16 @@ fn main() {
                 ..TitleBar::window_options()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
-                // The close button destroys the NSWindow immediately. GPUI only
-                // drops its window on a later turn, and until something calls
-                // quit the process stays in the Dock. `cx.quit` still flushes
-                // pending saves through `on_app_quit`.
-                #[cfg(target_os = "macos")]
-                window.on_window_should_close(cx, |_, cx| {
-                    cx.quit();
-                    true
+                // Closing hides to the tray instead of quitting; the tray's
+                // Quit entry (or cmd-Q) ends the process and flushes saves
+                // through `on_app_quit`.
+                #[cfg(any(target_os = "macos", windows))]
+                window.on_window_should_close(cx, |window, cx| {
+                    tray::hide(window, cx);
+                    false
                 });
+                #[cfg(any(target_os = "macos", windows))]
+                tray::init(window, cx);
                 cx.new(|cx| app::SwitchHostsApp::new(window, cx))
             })
             .expect("failed to open window");

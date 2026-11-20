@@ -13,6 +13,14 @@ close:
   zh-CN: "关闭"
   zh-TW: "關閉"
   en: "Close"
+tray_show:
+  zh-CN: "显示主窗口"
+  zh-TW: "顯示主視窗"
+  en: "Show Main Window"
+tray_quit:
+  zh-CN: "退出"
+  zh-TW: "結束"
+  en: "Quit"
 edit:
   zh-CN: "编辑"
   zh-TW: "編輯"
