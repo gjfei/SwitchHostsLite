@@ -1,7 +1,7 @@
 //! The system tray icon and close-to-tray behaviour: closing the window hides
-//! it (macOS hides the whole app, keeping the Dock icon), and only cmd-Q or
-//! the tray's Quit entry ends the process. The tray menu is deliberately
-//! small: show the window, quit.
+//! the app and, on macOS, drops its Dock tile so it stays in the menu bar only,
+//! and only cmd-Q or the tray's Quit entry ends the process. The tray menu is
+//! deliberately small: show the window, quit.
 //!
 //! Menu actions run on the main thread but outside any gpui callback, so they
 //! reach the app through a foreground task holding an `AsyncApp` instead of a
@@ -19,7 +19,8 @@ pub fn init(window: &Window, cx: &mut App) {
     windows::init(window, cx);
 }
 
-/// Bring the hidden app back when its Dock icon is clicked.
+/// Bring the hidden app back as a normal Dock app, from the tray's Show entry
+/// (and a Dock-icon click, which only applies when hiding left the icon up).
 #[cfg(target_os = "macos")]
 pub fn show(cx: &mut App) {
     macos::show(cx);
@@ -31,6 +32,7 @@ pub fn hide(window: &Window, cx: &mut App) {
     {
         let _ = window;
         cx.hide();
+        macos::enter_accessory();
     }
     #[cfg(windows)]
     {
@@ -48,7 +50,8 @@ mod macos {
     use objc2::runtime::AnyObject;
     use objc2::{define_class, msg_send, sel, AnyThread as _, DefinedClass as _, MainThreadOnly};
     use objc2_app_kit::{
-        NSApplication, NSImage, NSMenu, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+        NSApplication, NSApplicationActivationPolicy, NSImage, NSMenu, NSStatusBar, NSStatusItem,
+        NSVariableStatusItemLength,
     };
     use objc2_foundation::{NSData, NSObjectProtocol, NSSize, NSString};
     use rust_i18n::t;
@@ -149,9 +152,26 @@ mod macos {
 
     pub fn show(cx: &mut App) {
         if let Some(mtm) = objc2::MainThreadMarker::new() {
-            NSApplication::sharedApplication(mtm).unhide(None);
+            let app = NSApplication::sharedApplication(mtm);
+            // A hidden app is menu-bar only; a visible window is a normal Dock app.
+            app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+            app.unhide(None);
+        }
+        // A window created hidden at login was never ordered on-screen; bring it
+        // front so the tray's Show entry makes it visible too.
+        if let Some(handle) = cx.windows().into_iter().next() {
+            let _ = handle.update(cx, |_, window, _| window.activate_window());
         }
         cx.activate(true);
+    }
+
+    /// Drop the Dock tile while the window is closed, leaving the app in the
+    /// menu bar only.
+    pub fn enter_accessory() {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            NSApplication::sharedApplication(mtm)
+                .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+        }
     }
 }
 

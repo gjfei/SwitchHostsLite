@@ -86,7 +86,7 @@ fn main() {
     }
 
     let application = gpui_kit::application().with_assets(AppAssets);
-    // A hidden app is restored by clicking its Dock icon.
+    // A hidden app is restored as a normal Dock app from the tray menu.
     #[cfg(target_os = "macos")]
     application.on_reopen(tray::show);
     application.run(|cx| {

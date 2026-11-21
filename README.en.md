@@ -47,7 +47,7 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
   - **Folder**: can be nested. Its choice mode is "default" (follows the top-level single/multiple setting), "single" (only one child enabled at a time) or "multiple". Turning a folder on or off turns its children on or off too.
   - **Group**: references entries and combines their content in the chosen order.
 - **Switching applies immediately**: turning an entry on or off writes the system hosts right away. If writing fails (for example, the password prompt was cancelled), the switch reverts.
-- **Tray icon**: closing the window hides the app to the tray (macOS menu bar / Windows notification area) instead of quitting. The tray menu only has "Show Window" and "Quit"; quitting saves pending edits first. On macOS, clicking the Dock icon also brings the window back.
+- **Tray icon**: closing the window hides the app to the tray (macOS menu bar / Windows notification area) instead of quitting; on macOS the Dock icon also disappears, leaving the app in the menu bar only. The tray menu only has "Show Window" and "Quit"; quitting saves pending edits first. "Show Window" restores the Dock icon too on macOS.
 - **Launch at login**: the Preferences checkbox takes effect immediately (a LaunchAgent on macOS, the current user's Run registry value on Windows). A missing entry or one pointing at an old path is repaired at startup; the Windows uninstaller removes the registry value.
 - **Browser profiles**: without touching the system hosts, each profile turns on the hosts entries it wants in the main panel with its own switches and passes their rules to Chromium as `--host-resolver-rules`, launching Google Chrome or Microsoft Edge with a dedicated or temporary profile. You can also add the rules to your everyday browser profile (quit that browser completely first). Those switches are independent of the system hosts switches.
 - **Read-only system hosts view**: the first row of the list shows the current system hosts. If another program changed the file, it is re-read when the window regains focus.
@@ -138,7 +138,7 @@ The dividers between the panels can be dragged to resize them (at least 180 each
 
 ### Tray and launch at login
 
-- Closing the window (the title bar's close button) hides the app to the tray: a menu bar icon on macOS, a notification area icon on Windows. The tray menu only has "Show Window" and "Quit". Only ⌘Q / Ctrl+Q and the tray's "Quit" really exit, saving pending edits first. On macOS, clicking the Dock icon also brings the window back.
+- Closing the window (the title bar's close button) hides the app to the tray: on macOS the Dock icon also disappears, leaving only the menu bar icon; on Windows a notification area icon. The tray menu only has "Show Window" and "Quit". Only ⌘Q / Ctrl+Q and the tray's "Quit" really exit, saving pending edits first. On macOS, "Show Window" restores the Dock icon too.
 - The "Launch at login" checkbox in Preferences takes effect immediately: macOS writes `~/Library/LaunchAgents/com.switchhostslite.app.plist` (a LaunchAgent), Windows writes the `SwitchHostsLite` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. At startup, a missing entry or one pointing at an old path (the app was moved or reinstalled elsewhere) is rewritten automatically; unchecking removes the entry. The Windows uninstaller removes the registry value too.
 
 ### Applying to the system hosts

@@ -47,7 +47,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
   - **文件夹**：可以嵌套，选择模式分为「默认」（跟随顶层的单选 / 多选设置）、「单选」（同一时间只能启用一个子项）和「多选」；打开或关闭文件夹会同时打开或关闭其下的子项。
   - **组合**：引用若干方案，按选择的顺序合并它们的内容。
 - **开关即生效**：打开或关闭方案后立即写入系统 hosts；写入失败（例如取消了授权）时开关会自动恢复原状。
-- **托盘图标**：关闭窗口把应用隐藏到托盘（macOS 菜单栏 / Windows 通知区域）而不是退出；托盘菜单只有「显示主窗口」和「退出」，退出前会保存尚未写入的修改。macOS 上点击 Dock 图标也能恢复窗口。
+- **托盘图标**：关闭窗口把应用隐藏到托盘（macOS 菜单栏 / Windows 通知区域）而不是退出；macOS 上关闭窗口后 Dock 图标也消失，应用只留在菜单栏。托盘菜单只有「显示主窗口」和「退出」，退出前会保存尚未写入的修改；macOS 上「显示主窗口」会把 Dock 图标一并恢复。
 - **开机启动**：偏好设置中勾选后立即生效（macOS 写 LaunchAgent，Windows 写当前用户的 Run 注册表项）；启动时若条目缺失或指向旧路径会自动修复；Windows 卸载时一并清除注册表项。
 - **浏览器方案**：不改系统 hosts，在主面板中用自己的开关打开要使用的 hosts 条目，把其中的规则作为 Chromium 的 `--host-resolver-rules` 启动参数，用独立或临时的浏览器配置打开 Google Chrome 或 Microsoft Edge；也可以给日常使用的浏览器配置加上这些规则（需要先完全退出该浏览器）。这些开关与系统 hosts 的开关互不影响。
 - **系统 hosts 只读查看**：左侧列表第一项是系统 hosts 的当前内容；切回窗口时如果文件被其他程序改过，会自动重新读取。
@@ -138,7 +138,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 
 ### 托盘与开机启动
 
-- 关闭窗口（标题栏的关闭按钮）把应用隐藏到托盘：macOS 是菜单栏图标，Windows 是通知区域图标；托盘菜单只有「显示主窗口」和「退出」。⌘Q / Ctrl+Q 与托盘的「退出」才真正退出，退出前保存尚未写入的修改。macOS 上点击 Dock 图标也会恢复窗口。
+- 关闭窗口（标题栏的关闭按钮）把应用隐藏到托盘：macOS 上隐藏后 Dock 图标消失、只留菜单栏图标，Windows 是通知区域图标；托盘菜单只有「显示主窗口」和「退出」。⌘Q / Ctrl+Q 与托盘的「退出」才真正退出，退出前保存尚未写入的修改；macOS 上「显示主窗口」会把 Dock 图标一并恢复。
 - 偏好设置中的「开机启动」勾选后立即生效：macOS 写入 `~/Library/LaunchAgents/com.switchhostslite.app.plist`（LaunchAgent），Windows 写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下的 `SwitchHostsLite` 值。启动时若条目缺失或指向旧路径（移动过应用、换过安装目录），会自动重写；取消勾选即删除条目。Windows 卸载程序会一并清除该注册表值。
 
 ### 应用到系统 hosts
