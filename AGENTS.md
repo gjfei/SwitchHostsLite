@@ -132,7 +132,8 @@ The stub answers the resource-compiler probe and creates an empty output file; `
 ### autostart.rs
 
 - Launch at login, gated by `Settings::launch_at_login` (default off). The preference is the source of truth; `set(enabled)` applies it immediately from the Preferences checkbox (errors surface as `err_autostart` notifications and leave the setting unchanged), and `repair()` runs at startup when enabled: it rewrites the system entry when it is missing or points at a different executable (the app was moved or reinstalled).
-- macOS: `~/Library/LaunchAgents/com.switchhostslite.app.plist`, a LaunchAgent with `RunAtLoad` and the current exe in `ProgramArguments`. The plist helpers (`plist_xml`, `plist_program`, XML escaping) are pure and tested; `installed()` reads the program path back out of the file. Windows: the `SwitchHostsLite` REG_SZ value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, quoted exe path (`RegCreateKeyExW`/`RegSetValueExW`/`RegGetValueW`/`RegDeleteValueW`). The NSIS uninstaller deletes the Run value. Other Unix targets are no-ops.
+- Both entries pass `AUTOSTART_ARG` (`--autostart`) so the app can tell a login launch from a manual one (`launched_from_login()`); combined with `Settings::start_in_tray` (default on) `main` opens the window with `show`/`focus` false, sets macOS `Accessory` before creating it, and skips `activate`, so a login launch runs tray-only. The tray's Show entry (`tray::show`) calls `window.activate_window()` to order that never-shown window on-screen. Existing entries written before the arg was added are not migrated (a manual launch still shows the window); toggling the preference rewrites the entry.
+- macOS: `~/Library/LaunchAgents/com.switchhostslite.app.plist`, a LaunchAgent with `RunAtLoad` and `ProgramArguments` = the current exe then `--autostart`. The plist helpers (`plist_xml`, `plist_program`, XML escaping) are pure and tested; `installed()` reads the program path back out of the file. Windows: the `SwitchHostsLite` REG_SZ value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, the quoted exe path then ` --autostart` (`RegCreateKeyExW`/`RegSetValueExW`/`RegGetValueW`/`RegDeleteValueW`). The NSIS uninstaller deletes the Run value. Other Unix targets are no-ops.
 
 ### app.rs and app/
 
@@ -175,7 +176,7 @@ These are pure functions `fn(&str, Range<usize>) -> Option<Edit>` on UTF-8 byte 
 
 ### settings.rs
 
-`Settings` is a gpui `Global` persisted to `settings.json` with `#[serde(default)]`. Fields at their default values are skipped when written, and unknown fields are ignored. It holds the language, `ThemePref` (System/Light/Dark), the light/dark theme names (`None` means the default), the panel widths (`list_width` 240 / `browser_list_width` 260 / `tree_width` 300 / `info_width` 240 by default), `check_updates`, `last_update_check` and `launch_at_login` (default off, see `autostart.rs`). Change it only through `Settings::update(cx, |s| ..)`, which saves and re-sets the global.
+`Settings` is a gpui `Global` persisted to `settings.json` with `#[serde(default)]`. Fields at their default values are skipped when written, and unknown fields are ignored. It holds the language, `ThemePref` (System/Light/Dark), the light/dark theme names (`None` means the default), the panel widths (`list_width` 240 / `browser_list_width` 260 / `tree_width` 300 / `info_width` 240 by default), `check_updates`, `last_update_check`, `launch_at_login` (default off) and `start_in_tray` (default on: a login launch opens no window; see `autostart.rs`). Change it only through `Settings::update(cx, |s| ..)`, which saves and re-sets the global.
 
 ### themes.rs and app/preferences.rs
 

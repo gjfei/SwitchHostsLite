@@ -82,6 +82,9 @@ pub struct Settings {
     /// Start the app when the user logs in.
     #[serde(skip_serializing_if = "is_false")]
     pub launch_at_login: bool,
+    /// Start in the tray without opening the window when launched at login.
+    #[serde(skip_serializing_if = "is_true")]
+    pub start_in_tray: bool,
     /// Unix time of the last update check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_update_check: Option<i64>,
@@ -108,6 +111,7 @@ impl Default for Settings {
             info_width: DEFAULT_INFO_WIDTH,
             check_updates: true,
             launch_at_login: false,
+            start_in_tray: true,
             last_update_check: None,
         }
     }
@@ -208,6 +212,18 @@ mod tests {
         let s = Settings { launch_at_login: true, ..Default::default() };
         let text = serde_json::to_string(&s).unwrap();
         assert!(text.contains(r#""launch_at_login":true"#));
+        assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn start_in_tray_defaults_on_and_round_trips() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.start_in_tray);
+        // The default (on) stays out of the file.
+        assert!(!serde_json::to_string(&Settings::default()).unwrap().contains("start_in_tray"));
+        let s = Settings { start_in_tray: false, ..Default::default() };
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(text.contains(r#""start_in_tray":false"#));
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
     }
 

@@ -139,7 +139,7 @@ The dividers between the panels can be dragged to resize them (at least 180 each
 ### Tray and launch at login
 
 - Closing the window (the title bar's close button) hides the app to the tray: on macOS the Dock icon also disappears, leaving only the menu bar icon; on Windows a notification area icon. The tray menu only has "Show Window" and "Quit". Only ⌘Q / Ctrl+Q and the tray's "Quit" really exit, saving pending edits first. On macOS, "Show Window" restores the Dock icon too.
-- The "Launch at login" checkbox in Preferences takes effect immediately: macOS writes `~/Library/LaunchAgents/com.switchhostslite.app.plist` (a LaunchAgent), Windows writes the `SwitchHostsLite` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. At startup, a missing entry or one pointing at an old path (the app was moved or reinstalled elsewhere) is rewritten automatically; unchecking removes the entry. The Windows uninstaller removes the registry value too.
+- The "Launch at login" checkbox in Preferences takes effect immediately: macOS writes `~/Library/LaunchAgents/com.switchhostslite.app.plist` (a LaunchAgent), Windows writes the `SwitchHostsLite` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. At startup, a missing entry or one pointing at an old path (the app was moved or reinstalled elsewhere) is rewritten automatically; unchecking removes the entry. The Windows uninstaller removes the registry value too. The "Start in the tray at login" checkbox below it (on by default) makes a login launch open no window — pick "Show Window" from the tray when needed; it is disabled while "Launch at login" is off.
 
 ### Applying to the system hosts
 

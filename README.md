@@ -139,7 +139,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 ### 托盘与开机启动
 
 - 关闭窗口（标题栏的关闭按钮）把应用隐藏到托盘：macOS 上隐藏后 Dock 图标消失、只留菜单栏图标，Windows 是通知区域图标；托盘菜单只有「显示主窗口」和「退出」。⌘Q / Ctrl+Q 与托盘的「退出」才真正退出，退出前保存尚未写入的修改；macOS 上「显示主窗口」会把 Dock 图标一并恢复。
-- 偏好设置中的「开机启动」勾选后立即生效：macOS 写入 `~/Library/LaunchAgents/com.switchhostslite.app.plist`（LaunchAgent），Windows 写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下的 `SwitchHostsLite` 值。启动时若条目缺失或指向旧路径（移动过应用、换过安装目录），会自动重写；取消勾选即删除条目。Windows 卸载程序会一并清除该注册表值。
+- 偏好设置中的「开机启动」勾选后立即生效：macOS 写入 `~/Library/LaunchAgents/com.switchhostslite.app.plist`（LaunchAgent），Windows 写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下的 `SwitchHostsLite` 值。启动时若条目缺失或指向旧路径（移动过应用、换过安装目录），会自动重写；取消勾选即删除条目。Windows 卸载程序会一并清除该注册表值。下方的「登录启动时仅显示托盘图标」（默认开启）勾选后，开机启动时只进托盘、不打开窗口，需要时再从托盘「显示主窗口」打开；未开启「开机启动」时该项不可用。
 
 ### 应用到系统 hosts
 

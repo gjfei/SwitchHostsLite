@@ -1,7 +1,8 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui_kit::component::{
-    ActiveTheme as _, IndexPath, StyledExt as _, Theme, ThemeMode, ThemeRegistry, WindowExt as _,
+    ActiveTheme as _, Disableable as _, IndexPath, StyledExt as _, Theme, ThemeMode, ThemeRegistry,
+    WindowExt as _,
     button::{Toggle, ToggleGroup, ToggleVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -229,20 +230,33 @@ impl SwitchHostsApp {
             let mut general = v_flex().gap_3().child(multi_select).child(check_updates);
             #[cfg(any(target_os = "macos", windows))]
             {
-                general = general.child(
-                    Checkbox::new("pref-launch-at-login")
-                        .label(SharedString::from(t!("launch_at_login")))
-                        .checked(settings.launch_at_login)
-                        .cursor_pointer()
-                        .on_click(|checked: &bool, window, cx| {
-                            let checked = *checked;
-                            if let Err(err) = autostart::set(checked) {
-                                window.push_notification(Notification::error(error_text(&err)), cx);
-                                return;
-                            }
-                            Settings::update(cx, |s| s.launch_at_login = checked);
-                        }),
-                );
+                let start_in_tray = Checkbox::new("pref-start-in-tray")
+                    .label(SharedString::from(t!("start_in_tray")))
+                    .checked(settings.start_in_tray)
+                    .disabled(!settings.launch_at_login)
+                    .when(settings.launch_at_login, |this| this.cursor_pointer())
+                    .on_click(|checked: &bool, _, cx| {
+                        let checked = *checked;
+                        Settings::update(cx, |s| s.start_in_tray = checked);
+                    });
+                general = general
+                    .child(
+                        Checkbox::new("pref-launch-at-login")
+                            .label(SharedString::from(t!("launch_at_login")))
+                            .checked(settings.launch_at_login)
+                            .cursor_pointer()
+                            .on_click(|checked: &bool, window, cx| {
+                                let checked = *checked;
+                                if let Err(err) = autostart::set(checked) {
+                                    window.push_notification(Notification::error(error_text(&err)), cx);
+                                    return;
+                                }
+                                Settings::update(cx, |s| s.launch_at_login = checked);
+                                // Toggle the tray option's enabled state with it.
+                                cx.refresh_windows();
+                            }),
+                    )
+                    .child(start_in_tray);
             }
 
             dialog.title(t!("preferences")).w(px(420.)).child(

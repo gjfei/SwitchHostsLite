@@ -26,6 +26,12 @@ pub fn show(cx: &mut App) {
     macos::show(cx);
 }
 
+/// Drop the Dock tile at startup, for a login launch that opens no window.
+#[cfg(target_os = "macos")]
+pub fn enter_accessory() {
+    macos::enter_accessory();
+}
+
 /// The `on_window_should_close` body: hide instead of closing.
 pub fn hide(window: &Window, cx: &mut App) {
     #[cfg(target_os = "macos")]

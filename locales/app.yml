@@ -777,6 +777,10 @@ launch_at_login:
   zh-CN: "开机启动"
   zh-TW: "開機啟動"
   en: "Launch at login"
+start_in_tray:
+  zh-CN: "登录启动时仅显示托盘图标"
+  zh-TW: "登入啟動時僅顯示托盤圖示"
+  en: "Start in the tray at login"
 update_not_configured:
   zh-CN: "未配置更新源"
   zh-TW: "未設定更新來源"

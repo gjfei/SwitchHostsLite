@@ -9,6 +9,17 @@ use crate::i18n::Localize as _;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const LABEL: &str = "com.switchhostslite.app";
 
+/// Command-line marker the login item passes, so the app can tell a login
+/// launch (which may start in the tray) from a manual one.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+pub const AUTOSTART_ARG: &str = "--autostart";
+
+/// Whether this process was started by the login item.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+pub fn launched_from_login() -> bool {
+    std::env::args().any(|arg| arg == AUTOSTART_ARG)
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
@@ -31,6 +42,7 @@ fn plist_xml(exe: &str) -> String {
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
+        <string>{AUTOSTART_ARG}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -53,7 +65,7 @@ fn plist_program(xml: &str) -> Option<String> {
 /// Run-key command line; the quotes keep spaces in the install path intact.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn run_command(exe: &str) -> String {
-    format!("\"{exe}\"")
+    format!("\"{exe}\" {AUTOSTART_ARG}")
 }
 
 pub fn set(enabled: bool) -> Result<()> {
@@ -238,6 +250,7 @@ mod tests {
         let xml = plist_xml(exe);
         assert!(xml.contains(LABEL) && xml.contains("<key>RunAtLoad</key>"));
         assert!(xml.contains("a&amp;b/&lt;x&gt;") && !xml.contains("a&b"));
+        assert!(xml.contains(AUTOSTART_ARG));
         assert_eq!(plist_program(&xml).as_deref(), Some(exe));
     }
 
@@ -251,7 +264,7 @@ mod tests {
     fn run_command_quotes_spaces() {
         assert_eq!(
             run_command(r"C:\Program Files\SwitchHostsLite\switch-hosts-lite.exe"),
-            r#""C:\Program Files\SwitchHostsLite\switch-hosts-lite.exe""#
+            r#""C:\Program Files\SwitchHostsLite\switch-hosts-lite.exe" --autostart"#
         );
     }
 }

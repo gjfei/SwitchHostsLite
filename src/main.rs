@@ -99,6 +99,17 @@ fn main() {
             gpui_kit::init(cx);
             themes::load(cx);
             app::init(cx);
+            // Started by the login item with "start in tray" on: keep the
+            // window closed and, on macOS, drop the Dock tile from the start.
+            #[cfg(any(target_os = "macos", windows))]
+            let start_hidden =
+                autostart::launched_from_login() && settings::Settings::global(cx).start_in_tray;
+            #[cfg(not(any(target_os = "macos", windows)))]
+            let start_hidden = false;
+            #[cfg(target_os = "macos")]
+            if start_hidden {
+                tray::enter_accessory();
+            }
             #[cfg(all(target_os = "macos", debug_assertions))]
             macos::set_dock_icon();
             app::bind_keys(cx);
@@ -132,6 +143,8 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(720.), px(480.))),
                 titlebar: Some(titlebar),
+                focus: !start_hidden,
+                show: !start_hidden,
                 ..TitleBar::window_options()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
@@ -148,7 +161,9 @@ fn main() {
                 cx.new(|cx| app::SwitchHostsApp::new(window, cx))
             })
             .expect("failed to open window");
-            cx.activate(true);
+            if !start_hidden {
+                cx.activate(true);
+            }
             updater::init(cx);
         });
 }
