@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working on **SwitchHosts Lite**, a native hosts switcher modeled on [SwitchHosts](https://github.com/oldj/SwitchHosts). It is a single Rust binary built with gpui and gpui-component, which come in through `gpui-kit` 0.9.0 (`use gpui_kit::*`, `gpui_kit::component::*`, `gpui_kit::assets::*`). User-facing docs live in `README.md` (Chinese, the primary version) and `README.en.md`; keep both in sync when behavior changes.
+Guidance for coding agents working on **SwitchHosts Lite**, a native hosts switcher modeled on [SwitchHosts](https://github.com/oldj/SwitchHosts). It is a single Rust binary built with gpui and gpui-component, which come in through `gpui-kit` 0.10.0 (`use gpui_kit::*`, `gpui_kit::component::*`, `gpui_kit::assets::*`). User-facing docs live in `README.md` (Chinese, the primary version) and `README.en.md`; keep both in sync when behavior changes.
 
 ## Commands
 

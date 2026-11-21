@@ -15,7 +15,7 @@ dirs = "7.0.0"
 # Both image pickers hand their result back through a oneshot channel.
 futures-channel = { version = "0.3.34", default-features = false, features = ["std"] }
 # gpui-kit pins the matching gpui release and re-exports gpui + gpui-component + icons.
-gpui-kit = "0.9.0"
+gpui-kit = "0.10.0"
 # Same version as gpui-component's, so both share one global locale.
 rust-i18n = "4.2.4"
 serde = { version = "1.0.229", features = ["derive"] }
