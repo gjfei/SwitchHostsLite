@@ -62,8 +62,10 @@ mod macos {
     use objc2_foundation::{NSData, NSObjectProtocol, NSSize, NSString};
     use rust_i18n::t;
 
-    const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
-    /// Menu-bar icons are drawn at about 18 pt; the source PNG is 256 px.
+    /// A template image: only the alpha channel (the shape) is used; AppKit
+    /// tints it black in light mode and white in dark mode. The PNG is 36 px
+    /// (@2x) for the ~18 pt menu bar.
+    const ICON_PNG: &[u8] = include_bytes!("../assets/tray-template.png");
     const ICON_SIZE: f64 = 18.;
 
     struct Ivars {
@@ -149,6 +151,7 @@ mod macos {
             let data = NSData::with_bytes(ICON_PNG);
             if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
                 image.setSize(NSSize::new(ICON_SIZE, ICON_SIZE));
+                image.setTemplate(true);
                 button.setImage(Some(&image));
             }
         }
