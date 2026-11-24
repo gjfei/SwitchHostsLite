@@ -231,7 +231,6 @@ mod windows {
 
     /// The tray callback message; `lParam`'s low word carries the mouse event.
     const WM_TRAY: u32 = WM_APP + 1;
-    const CLASS: &str = "SwitchHostsLiteTray";
     /// The installer posts this to ask a running instance to quit gracefully.
     /// Keep the name in sync with scripts/windows/installer.nsi.
     const QUIT_MESSAGE: &str = "SwitchHostsLite_Quit";
@@ -243,6 +242,7 @@ mod windows {
         app: AsyncApp,
         executor: ForegroundExecutor,
         quit_msg: u32,
+        show_msg: u32,
     }
 
     /// A copy of the state taken before acting, so the RefCell is never held
@@ -256,6 +256,7 @@ mod windows {
     enum Action {
         Toggle(HWND, Ctx),
         Menu(HWND, Ctx),
+        Show(Ctx),
         Quit(Ctx),
         Ignore,
     }
@@ -269,8 +270,8 @@ mod windows {
         let Some(main) = main_hwnd(window) else {
             return;
         };
-        let class = wide(CLASS);
-        let title = wide("SwitchHosts Lite Tray");
+        let class = wide(crate::singleton::CLASS);
+        let title = wide(crate::singleton::TITLE);
         // SAFETY: every wide string outlives the calls, the window class and
         // NOTIFYICONDATAW are zeroed before their named fields are set, and
         // the icon handle stays alive for the process (loaded from the exe).
@@ -300,6 +301,7 @@ mod windows {
                 return;
             }
             let quit_msg = RegisterWindowMessageW(wide(QUIT_MESSAGE).as_ptr());
+            let show_msg = RegisterWindowMessageW(wide(crate::singleton::SHOW_MESSAGE).as_ptr());
             let icon = LoadIconW(instance, ICON_RESOURCE as *const u16);
             let mut data: NOTIFYICONDATAW = std::mem::zeroed();
             data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
@@ -320,6 +322,7 @@ mod windows {
                     app: cx.to_async(),
                     executor: cx.foreground_executor().clone(),
                     quit_msg,
+                    show_msg,
                 });
             });
             TRAY.with(|t| *t.borrow_mut() = tray);
@@ -362,11 +365,18 @@ mod windows {
                     _ => Action::Ignore,
                 });
             }
+            if msg != 0 && msg == state.show_msg {
+                return Some(Action::Show(state.ctx()));
+            }
             (msg != 0 && msg == state.quit_msg).then(|| Action::Quit(state.ctx()))
         });
         match action {
             Some(Action::Toggle(main, ctx)) => toggle(main, &ctx),
             Some(Action::Menu(tray, ctx)) => show_menu(tray, &ctx),
+            Some(Action::Show(ctx)) => {
+                ctx.app.update(|cx| crate::tray::set_hidden(cx, false));
+                show_main(ctx.main);
+            }
             Some(Action::Quit(ctx)) => quit(&ctx),
             Some(Action::Ignore) => {}
             // SAFETY: unhandled messages go to the default procedure.

@@ -14,6 +14,8 @@ mod macos;
 mod panels;
 mod platform;
 mod remote;
+#[cfg(any(target_os = "macos", windows))]
+mod singleton;
 mod settings;
 mod store;
 mod switchhosts;
@@ -85,6 +87,11 @@ fn main() {
         updater::run_update_installer_helper();
     }
 
+    #[cfg(any(target_os = "macos", windows))]
+    let Some(_instance) = singleton::acquire().expect("failed to acquire app instance") else {
+        return;
+    };
+
     let application = gpui_kit::application().with_assets(AppAssets);
     // A hidden app is restored as a normal Dock app from the tray menu.
     #[cfg(target_os = "macos")]
@@ -99,6 +106,8 @@ fn main() {
             gpui_kit::init(cx);
             themes::load(cx);
             app::init(cx);
+            #[cfg(target_os = "macos")]
+            singleton::watch(cx);
             // Started by the login item with "start in tray" on: keep the
             // window closed and, on macOS, drop the Dock tile from the start.
             #[cfg(any(target_os = "macos", windows))]
