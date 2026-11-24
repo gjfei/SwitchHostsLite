@@ -7,14 +7,37 @@
 //! reach the app through a foreground task holding an `AsyncApp` instead of a
 //! direct borrow, which would panic while a callback is on the stack.
 
-use gpui_kit::{App, Window};
+use gpui_kit::{App, Global, Window};
+
+pub struct HiddenState(pub bool);
+
+impl Global for HiddenState {}
+
+pub fn set_hidden(cx: &mut App, hidden: bool) {
+    if cx.try_global::<HiddenState>().map(|state| state.0) != Some(hidden) {
+        cx.set_global(HiddenState(hidden));
+    }
+}
+
+pub fn is_hidden(cx: &App) -> bool {
+    cx.try_global::<HiddenState>().is_some_and(|state| state.0)
+}
+
+fn initially_hidden(launched_from_login: bool, start_in_tray: bool) -> bool {
+    launched_from_login && start_in_tray
+}
 
 pub fn init(window: &Window, cx: &mut App) {
+    let _ = window;
+    set_hidden(
+        cx,
+        initially_hidden(
+            crate::autostart::launched_from_login(),
+            crate::settings::Settings::global(cx).start_in_tray,
+        ),
+    );
     #[cfg(target_os = "macos")]
-    {
-        let _ = window;
-        macos::init(cx);
-    }
+    macos::init(cx);
     #[cfg(windows)]
     windows::init(window, cx);
 }
@@ -23,6 +46,7 @@ pub fn init(window: &Window, cx: &mut App) {
 /// (and a Dock-icon click, which only applies when hiding left the icon up).
 #[cfg(target_os = "macos")]
 pub fn show(cx: &mut App) {
+    set_hidden(cx, false);
     macos::show(cx);
 }
 
@@ -34,6 +58,7 @@ pub fn enter_accessory() {
 
 /// The `on_window_should_close` body: hide instead of closing.
 pub fn hide(window: &Window, cx: &mut App) {
+    set_hidden(cx, true);
     #[cfg(target_os = "macos")]
     {
         let _ = window;
@@ -90,7 +115,7 @@ mod macos {
                 let ivars = self.ivars();
                 let app = ivars.app.clone();
                 ivars.executor.spawn(async move {
-                    app.update(show);
+                    app.update(super::show);
                 })
                 .detach();
             }
@@ -229,7 +254,7 @@ mod windows {
     }
 
     enum Action {
-        Toggle(HWND),
+        Toggle(HWND, Ctx),
         Menu(HWND, Ctx),
         Quit(Ctx),
         Ignore,
@@ -332,7 +357,7 @@ mod windows {
             let state = state.as_ref()?;
             if msg == WM_TRAY {
                 return Some(match lparam as u32 & 0xffff {
-                    WM_LBUTTONUP => Action::Toggle(state.main),
+                    WM_LBUTTONUP => Action::Toggle(state.main, state.ctx()),
                     WM_RBUTTONUP => Action::Menu(state.main, state.ctx()),
                     _ => Action::Ignore,
                 });
@@ -340,7 +365,7 @@ mod windows {
             (msg != 0 && msg == state.quit_msg).then(|| Action::Quit(state.ctx()))
         });
         match action {
-            Some(Action::Toggle(main)) => toggle(main),
+            Some(Action::Toggle(main, ctx)) => toggle(main, &ctx),
             Some(Action::Menu(tray, ctx)) => show_menu(tray, &ctx),
             Some(Action::Quit(ctx)) => quit(&ctx),
             Some(Action::Ignore) => {}
@@ -356,13 +381,16 @@ mod windows {
         }
     }
 
-    fn toggle(main: HWND) {
+    fn toggle(main: HWND, ctx: &Ctx) {
+        // SAFETY: the handle belongs to this process's main window.
+        let hidden = unsafe { IsWindowVisible(main) == 0 || IsIconic(main) != 0 };
+        ctx.app.update(|cx| crate::tray::set_hidden(cx, hidden));
         // SAFETY: the handle belongs to this process's main window.
         unsafe {
-            if IsWindowVisible(main) != 0 && IsIconic(main) == 0 {
-                ShowWindow(main, SW_HIDE);
-            } else {
+            if hidden {
                 show_main(main);
+            } else {
+                ShowWindow(main, SW_HIDE);
             }
         }
     }
@@ -394,7 +422,10 @@ mod windows {
             let cmd = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, tray, std::ptr::null());
             DestroyMenu(menu);
             match cmd {
-                1 => show_main(ctx.main),
+                1 => {
+                    ctx.app.update(|cx| crate::tray::set_hidden(cx, false));
+                    show_main(ctx.main);
+                }
                 2 => quit(ctx),
                 _ => {}
             }
@@ -425,5 +456,18 @@ mod windows {
                 Shell_NotifyIconW(NIM_DELETE, &data);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initially_hidden;
+
+    #[test]
+    fn only_login_launches_can_start_hidden() {
+        assert!(!initially_hidden(false, false));
+        assert!(!initially_hidden(false, true));
+        assert!(!initially_hidden(true, false));
+        assert!(initially_hidden(true, true));
     }
 }

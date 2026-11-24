@@ -20,7 +20,7 @@ use crate::browser::{self, BrowserProfile};
 use crate::i18n::error_text;
 use crate::settings::{Settings, ThemePref};
 use crate::store::{FolderMode, History, Item, ItemKind, Store, TrashItem, TrashedProfile};
-use crate::{editor_ops, highlight, hosts, panels, remote, store, tile};
+use crate::{editor_ops, highlight, hosts, panels, remote, store, tile, tray};
 
 mod backup;
 mod browser_panel;
@@ -199,7 +199,7 @@ impl SwitchHostsApp {
             preferences::apply_theme(window.appearance(), cx);
         }
 
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             cx.subscribe_in(&editor, window, |this, editor, event, window, cx| {
                 if let InputEvent::Change = event
                     && let Some(item) = this.selected_item_mut()
@@ -241,6 +241,12 @@ impl SwitchHostsApp {
             }),
         ];
 
+        #[cfg(any(target_os = "macos", windows))]
+        subscriptions.push(cx.observe_global::<tray::HiddenState>(|this, cx| {
+            if !tray::is_hidden(cx) {
+                this.start_running_poll(cx);
+            }
+        }));
         let settings = Settings::global(cx);
 
         let mut app = Self {
@@ -756,17 +762,27 @@ impl SwitchHostsApp {
         .detach();
     }
 
-    /// Keep probing while the browser view is open, so quitting a browser
-    /// outside the app shows up without switching windows first.
+    /// Keep probing while the visible browser view is open, so quitting a
+    /// browser outside the app shows up without switching windows first.
     fn start_running_poll(&mut self, cx: &mut Context<Self>) {
+        if !self.in_browser_view() || tray::is_hidden(cx) {
+            return;
+        }
         self.refresh_running(cx);
         self.running_generation += 1;
         let generation = self.running_generation;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(RUNNING_POLL).await;
-                let Ok((active, profiles)) = this.update(cx, |this, _| {
-                    (this.in_browser_view() && this.running_generation == generation, this.store.profiles.clone())
+                let Ok((active, profiles)) = cx.update(|cx| {
+                    let hidden = tray::is_hidden(cx);
+                    this.update(cx, |this, _| {
+                        let active = this.in_browser_view()
+                            && this.running_generation == generation
+                            && !hidden;
+                        // Superseded loops only exit; starting a poll owns the generation.
+                        (active, this.store.profiles.clone())
+                    })
                 }) else {
                     break;
                 };
@@ -778,7 +794,9 @@ impl SwitchHostsApp {
                     .spawn(async move { probe_running(profiles) })
                     .await;
                 let Ok(still_active) = this.update(cx, |this, cx| {
-                    let active = this.in_browser_view() && this.running_generation == generation;
+                    let active = this.in_browser_view()
+                        && this.running_generation == generation
+                        && !tray::is_hidden(cx);
                     if active {
                         this.profile_procs = procs;
                         cx.notify();
