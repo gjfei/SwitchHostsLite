@@ -206,6 +206,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
+          fetch-depth: 0
 
       # Download to "dist": "assets" collides with the repo's own assets/
       # directory and would publish the icons and app.rc as release files.
@@ -216,7 +217,28 @@ jobs:
 
       - name: Release notes
         run: |
-          gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
+          generated=false
+          notes_tmp="$(mktemp)"
+          for attempt in 1 2 3 4 5; do
+            if gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name="$TAG" --jq .body > "$notes_tmp" 2>/dev/null && [ -s "$notes_tmp" ]; then
+              mv "$notes_tmp" notes.md
+              generated=true
+              break
+            fi
+            sleep $((attempt * 2))
+          done
+          if [ "$generated" = false ]; then
+            previous="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+            {
+              echo "## What's Changed"
+              echo
+              if [ -n "$previous" ]; then
+                echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${previous}...${TAG}"
+              else
+                echo "Release ${TAG}."
+              fi
+            } > notes.md
+          fi
           cat notes.md
 
       - name: latest.json and SHA256SUMS.txt
@@ -226,8 +248,8 @@ jobs:
           cat dist/latest.json dist/SHA256SUMS.txt
           ls -l dist
 
-      # The updater reads releases/latest, which skips pre-releases (tags
-      # with a `-`, e.g. v1.0.0-beta.1), so those never reach users' apps.
+      # Stable tags become the latest release; tags with a `-` stay prereleases.
+      # The updater reads latest.json from the highest semver release.
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
