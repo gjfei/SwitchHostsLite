@@ -29,6 +29,8 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
 
 ![Info panel](assets/screenshots/info-panel.png)
 
+![Browser profiles](assets/screenshots/browser-profiles.png)
+
 ![Edit sheet](assets/screenshots/edit-sheet.png)
 
 ![Version history](assets/screenshots/history.png)

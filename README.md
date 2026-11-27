@@ -29,6 +29,8 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 
 ![信息面板](assets/screenshots/info-panel.png)
 
+![浏览器方案](assets/screenshots/browser-profiles.png)
+
 ![编辑方案](assets/screenshots/edit-sheet.png)
 
 ![历史版本](assets/screenshots/history.png)
