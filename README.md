@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gjfei/SwitchHostsLite/actions/workflows/ci.yml"><img src="https://github.com/gjfei/SwitchHostsLite/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/gjfei/SwitchHostsLite/releases/latest"><img src="https://img.shields.io/github/v/release/gjfei/SwitchHostsLite?sort=semver" alt="Release"></a>
+  <a href="https://github.com/jarven97/SwitchHostsLite/actions/workflows/ci.yml"><img src="https://github.com/jarven97/SwitchHostsLite/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/jarven97/SwitchHostsLite/releases/latest"><img src="https://img.shields.io/github/v/release/jarven97/SwitchHostsLite?sort=semver" alt="Release"></a>
 </p>
 
 SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻量版：用 Rust 和 [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component)（通过 `gpui-kit`）写成的原生桌面应用，不依赖 Electron 或 WebView。它保留了 SwitchHosts 的核心用法——把 hosts 规则分成多个方案，按需开关并写入系统 hosts——并且能导入 SwitchHosts 的备份。支持 macOS 和 Windows。
@@ -77,7 +77,7 @@ SwitchHosts Lite 是 [SwitchHosts](https://github.com/oldj/SwitchHosts) 的轻�
 
 ## 下载安装
 
-从 [GitHub Releases](https://github.com/gjfei/SwitchHostsLite/releases/latest) 下载对应平台的文件（`<版本>` 为版本号）：
+从 [GitHub Releases](https://github.com/jarven97/SwitchHostsLite/releases/latest) 下载对应平台的文件（`<版本>` 为版本号）：
 
 | 平台 | 文件 |
 | --- | --- |
@@ -284,7 +284,7 @@ scripts/bundle-macos.sh --target x86_64-apple-darwin --out dist
 应用内更新先读取 `https://api.github.com/repos/<owner>/<repo>/releases?per_page=20`（含预发布、跳过草稿），按 semver 取附带 `latest.json` 的最高版本，再获取该版本的 `latest.json`。API 失败时（匿名调用每小时限 60 次）回退到 github.com 的 `releases.atom` feed 和发布页的 `expanded_assets` 片段取版本列表与 `latest.json` 地址，这两者是普通网页，不受 API 限流影响。macOS 安装包取 `latest.json` 中的 `<平台>-dmg` 键（供手动安装），`<平台>` 键的 zip 保留给旧版本的自动更新。仓库在**编译时**确定：
 
 - 优先使用环境变量 `SHL_UPDATE_REPO=owner/repo`（发布流程会自动设为当前仓库）；
-- 否则使用 `Cargo.toml` 中的 `repository`（当前为 `gjfei/SwitchHostsLite`）。若改为占位符 `OWNER`，更新功能会关闭，菜单中显示「检查更新（未配置更新源）」。
+- 否则使用 `Cargo.toml` 中的 `repository`（当前为 `jarven97/SwitchHostsLite`）。若改为占位符 `OWNER`，更新功能会关闭，菜单中显示「检查更新（未配置更新源）」。
 
 ### 可选：代码签名
 

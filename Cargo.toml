@@ -6,7 +6,7 @@ description = "A lightweight hosts switcher inspired by SwitchHosts"
 license = "Apache-2.0"
 # The updater reads GitHub releases of this repository (SHL_UPDATE_REPO=owner/repo
 # at build time overrides it).
-repository = "https://github.com/gjfei/SwitchHostsLite"
+repository = "https://github.com/jarven97/SwitchHostsLite"
 
 [dependencies]
 anyhow = "1.0.104"

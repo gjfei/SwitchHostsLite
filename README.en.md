@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gjfei/SwitchHostsLite/actions/workflows/ci.yml"><img src="https://github.com/gjfei/SwitchHostsLite/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/gjfei/SwitchHostsLite/releases/latest"><img src="https://img.shields.io/github/v/release/gjfei/SwitchHostsLite?sort=semver" alt="Release"></a>
+  <a href="https://github.com/jarven97/SwitchHostsLite/actions/workflows/ci.yml"><img src="https://github.com/jarven97/SwitchHostsLite/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/jarven97/SwitchHostsLite/releases/latest"><img src="https://img.shields.io/github/v/release/jarven97/SwitchHostsLite?sort=semver" alt="Release"></a>
 </p>
 
 SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/SwitchHosts): a native desktop app written in Rust with [gpui](https://www.gpui.rs/) / [gpui-component](https://github.com/longbridge/gpui-component) (through `gpui-kit`), with no Electron or WebView. It keeps the core SwitchHosts workflow (split hosts rules into entries, switch them on and off, write them to the system hosts file) and can import SwitchHosts backups. It runs on macOS and Windows.
@@ -77,7 +77,7 @@ SwitchHosts Lite is a lightweight take on [SwitchHosts](https://github.com/oldj/
 
 ## Download and install
 
-Download the file for your platform from [GitHub Releases](https://github.com/gjfei/SwitchHostsLite/releases/latest) (`<version>` is the version number):
+Download the file for your platform from [GitHub Releases](https://github.com/jarven97/SwitchHostsLite/releases/latest) (`<version>` is the version number):
 
 | Platform | File |
 | --- | --- |
@@ -284,7 +284,7 @@ The script builds a release binary, writes `Info.plist` (version taken from `Car
 The in-app updater first reads `https://api.github.com/repos/<owner>/<repo>/releases?per_page=20` (pre-releases included, drafts skipped), picks the highest semver release carrying `latest.json`, then fetches that release's `latest.json`. When the API fails (anonymous calls are limited to 60 per hour) it falls back to github.com's `releases.atom` feed and the release page's `expanded_assets` fragment for the version list and the `latest.json` URL; those are ordinary web pages, not subject to the API rate limit. macOS packages come from the `<platform>-dmg` key of `latest.json` (for the manual install); the zip under `<platform>` stays for older versions' auto-update. The repository is fixed **at build time**:
 
 - `SHL_UPDATE_REPO=owner/repo` takes precedence (the release workflow sets it to the current repository);
-- otherwise `repository` in `Cargo.toml` is used (currently `gjfei/SwitchHostsLite`). If it is set to the `OWNER` placeholder, updates are disabled and the menu shows "Check for Updates (no update source)".
+- otherwise `repository` in `Cargo.toml` is used (currently `jarven97/SwitchHostsLite`). If it is set to the `OWNER` placeholder, updates are disabled and the menu shows "Check for Updates (no update source)".
 
 ### Optional: code signing
 
