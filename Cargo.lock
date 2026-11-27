@@ -6072,7 +6072,7 @@ dependencies = [
 
 [[package]]
 name = "switch-hosts-lite"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
